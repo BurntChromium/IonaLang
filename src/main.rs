@@ -1,4 +1,5 @@
 use chumsky::prelude::*;
+use ariadne::{Report, ReportKind, Source, Label, Color};
 
 #[derive(Debug, PartialEq, Clone)]
 struct Field {
@@ -6,16 +7,16 @@ struct Field {
     type_: String,
 }
 
-/// Properties for objects (Structs and Enums)
+/// Properties for data types (Structs and Enums)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ObjectProperties {
+enum DataProperties {
     Public,
     Export,
 }
 
-/// `Derivable` methods for objects (Structs and Enums)
+/// `Derivable` methods for data types (Structs and Enums)
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum ObjectMethods {
+enum DataMethods {
     Eq,
     Log,
     Custom(String),
@@ -25,8 +26,8 @@ enum ObjectMethods {
 struct Struct {
     name: String,
     fields: Vec<Field>,
-    props: Vec<ObjectProperties>,
-    derives: Vec<ObjectMethods>,
+    props: Vec<DataProperties>,
+    derives: Vec<DataMethods>,
 }
 
 const RESERVED_KEYWORDS: [&str; 2] = ["is", "derives"];
@@ -34,7 +35,7 @@ const RESERVED_KEYWORDS: [&str; 2] = ["is", "derives"];
 fn struct_parser() -> impl Parser<char, Struct, Error = Simple<char>> {
     let ident = text::ident()
         .try_map(|s: String, span| {
-            if s != "is" && s != "derives" {
+            if !RESERVED_KEYWORDS.contains(&&s.as_str()) {
                 Ok(s)
             } else {
                 Err(Simple::custom(span, "Unexpected keyword"))
@@ -52,23 +53,23 @@ fn struct_parser() -> impl Parser<char, Struct, Error = Simple<char>> {
     let fields = field.separated_by(just("::")).at_least(1);
 
     let struct_property = choice((
-        just("Public").to(ObjectProperties::Public),
-        just("Debug").to(ObjectProperties::Export),
+        text::keyword("Public").to(DataProperties::Public),
+        text::keyword("Export").to(DataProperties::Export),
     ));
 
     let struct_derives = choice((
-        just("Eq").to(ObjectMethods::Eq),
-        just("Log").to(ObjectMethods::Log),
+        text::keyword("Eq").to(DataMethods::Eq),
+        text::keyword("Log").to(DataMethods::Log),
     ))
-    .or(ident.map(ObjectMethods::Custom));
+    .or(ident.map(DataMethods::Custom));
 
     let properties = just("is")
-        .ignore_then(struct_property.repeated())
+        .ignore_then(struct_property.padded().repeated())
         .or_not()
         .map(|opt| opt.unwrap_or_default());
 
     let derives = just("derives")
-        .ignore_then(struct_derives.repeated())
+        .ignore_then(struct_derives.padded().repeated())
         .or_not()
         .map(|opt| opt.unwrap_or_default());
 
@@ -89,9 +90,32 @@ fn struct_parser() -> impl Parser<char, Struct, Error = Simple<char>> {
 }
 
 fn main() {
-    let input = "struct Employee = id int :: salary int is Public ThreadSafe derives Log;";
+    let input = "struct Employee = id int :: salary int is Public derives Log;";
+    let file_id = "example.txt";
+
     match struct_parser().parse(input) {
         Ok(struct_def) => println!("{:?}", struct_def),
-        Err(e) => println!("Error: {:?}", e),
+        Err(e) => {
+            let report = Report::build(ReportKind::Error, file_id, 0)
+                .with_message("Failed to parse struct definition")
+                .with_label(Label::new((file_id, 0..input.len()))
+                    .with_message("in this struct definition")
+                    .with_color(Color::Red))
+                .with_labels(e.into_iter().map(|e| {
+                    let expected = e.expected().map(|expected| match expected {
+                        Some(c) => format!("'{}'", c),
+                        None => "end of input".to_string(),
+                    }).collect::<Vec<_>>().join(", ");
+                    
+                    let found = e.found().map(|c| format!("'{}'", c)).unwrap_or_else(|| "end of input".to_string());
+                    
+                    Label::new((file_id, e.span().start..e.span().end))
+                        .with_message(format!("Expected {}, found {}", expected, found))
+                        .with_color(Color::Yellow)
+                }))
+                .finish();
+
+            report.eprint((file_id, Source::from(input))).unwrap();
+        }
     }
 }
