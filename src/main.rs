@@ -53,8 +53,8 @@ fn struct_parser() -> impl Parser<char, Struct, Error = Simple<char>> {
     let fields = field.separated_by(just("::")).at_least(1);
 
     let struct_property = choice((
-        text::keyword("Public").to(DataProperties::Public),
-        text::keyword("Export").to(DataProperties::Export),
+        text::keyword("Public").to(DataProperties::Public).labelled("Public"),
+        text::keyword("Export").to(DataProperties::Export).labelled("Export"),
     ));
 
     let struct_derives = choice((
@@ -102,12 +102,19 @@ fn main() {
                     .with_message("in this struct definition")
                     .with_color(Color::Red))
                 .with_labels(e.into_iter().map(|e| {
-                    let expected = e.expected().map(|expected| match expected {
-                        Some(c) => format!("'{}'", c),
-                        None => "end of input".to_string(),
-                    }).collect::<Vec<_>>().join(", ");
+                    let expected = if e.expected().next().is_some() {
+                        e.expected()
+                            .map(|expected| match expected {
+                                Some(c) => format!("'{}'", c),
+                                None => "end of input".to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    } else {
+                        "a valid identifier".to_string()  // Provide a fallback
+                    };
                     
-                    let found = e.found().map(|c| format!("'{}'", c)).unwrap_or_else(|| "end of input".to_string());
+                    let found = e.found().map(|c| format!("'{}'", c)).unwrap_or_else(|| "<something else>".to_string());
                     
                     Label::new((file_id, e.span().start..e.span().end))
                         .with_message(format!("Expected {}, found {}", expected, found))
