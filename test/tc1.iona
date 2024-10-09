@@ -1,0 +1,10 @@
+import fs;
+import math with pow sqrt;
+
+struct Employee = id int :: salary int 
+	is Public
+	derives Log;
+
+enum EmployeeType = Salaried Int | Contract
+	is Public
+	derives Log;

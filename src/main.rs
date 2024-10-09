@@ -1,31 +1,46 @@
 mod parser;
 
+use std::env;
+use std::error::Error;
+use std::fs;
+use std::time::Instant;
+
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
 use crate::parser::*;
 
-fn main() {
-    let input = r#"
-        import math with sqrt pow;
-        struct Employee = id int :: salary int is Public derives Log;
-        enum EmployeeType = Salaried Int | Contract
-	        is Public
-	        derives Log;
-    "#;
-
-    let file_id = "example.txt";
-
-    match parse_source(input) {
+fn main() -> Result<(), Box<dyn Error>> {
+    // Capture command line
+    let args: Vec<String> = env::args().collect();
+    let file: &str = if args.len() == 1 {
+        "main.iona"
+    } else {
+        &args[1]
+    };
+    // Try to open linked file
+    let maybe_text = fs::read_to_string(file);
+    let program_root: String;
+    if maybe_text.is_err() {
+        return Err(format!("unable to find file {}, aborting compilation", file).into());
+    } else {
+        program_root = maybe_text.unwrap();
+    }
+    // Start timer
+    let now = Instant::now();
+    println!("input file is: \n{}", program_root);
+    // Parse the file
+    match parse_source(&program_root) {
         Ok(struct_def) => {
-            println!("successfully parsed file");
+            let elapsed = now.elapsed();
+            println!("parsed file in {:.2?}", elapsed);
             println!("{:#?}", struct_def);
         }
         Err(e) => {
             println!("{:#?}", e);
-            let report = Report::build(ReportKind::Error, file_id, 0)
+            let report = Report::build(ReportKind::Error, file, 0)
                 .with_message("Failed to parse")
                 .with_label(
-                    Label::new((file_id, 0..input.len()))
+                    Label::new((file, 0..program_root.len()))
                         .with_message("in this line")
                         .with_color(Color::Red),
                 )
@@ -34,7 +49,7 @@ fn main() {
                         e.expected()
                             .map(|expected| match expected {
                                 Some(c) => format!("'{}'", c),
-                                None => "end of input".to_string(),
+                                None => "end of program_root".to_string(),
                             })
                             .collect::<Vec<_>>()
                             .join(", ")
@@ -47,13 +62,14 @@ fn main() {
                         .map(|c| format!("'{}'", c))
                         .unwrap_or_else(|| "<something else>".to_string());
 
-                    Label::new((file_id, e.span().start..e.span().end))
+                    Label::new((file, e.span().start..e.span().end))
                         .with_message(format!("Expected {}, found {}", expected, found))
                         .with_color(Color::Yellow)
                 }))
                 .finish();
 
-            report.eprint((file_id, Source::from(input))).unwrap();
+            report.eprint((file, Source::from(program_root))).unwrap();
         }
     }
+    Ok(())
 }
