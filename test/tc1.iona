@@ -1,10 +1,13 @@
 import fs;
 import math with pow sqrt;
 
-struct Employee = id int :: salary int 
+alias Salary = int;
+alias Salaries = List[Salary];
+
+struct Employee = id int :: salary Salary 
 	is Public
 	derives Log;
 
-enum EmployeeType = Salaried Int | Contract
+enum EmployeeType = Salaried int | Contract
 	is Public
 	derives Log;
