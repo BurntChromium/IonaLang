@@ -46,14 +46,16 @@ fn get_camel_case_parser() -> &'static (dyn Parser<char, String, Error = Simple<
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ASTNode {
     ImportStatement(Import),
-    StructDeclaration(Struct),
+    StructDeclaration(Object),
+    EnumDeclaration(Object),
 }
 
 fn ast_parser() -> impl Parser<char, Vec<ASTNode>, Error = Simple<char>> {
     let import_node = import_parser().map(ASTNode::ImportStatement);
     let struct_node = struct_parser().map(ASTNode::StructDeclaration);
+    let enum_node = enum_parser().map(ASTNode::EnumDeclaration);
 
-    let node = import_node.or(struct_node);
+    let node = import_node.or(struct_node).or(enum_node);
 
     node.padded().repeated().then_ignore(end())
 }
@@ -80,7 +82,7 @@ fn import_parser() -> impl Parser<char, Import, Error = Simple<char>> {
         .or_not()
         .map(|opt_items| opt_items.unwrap_or_default());
 
-    just("import")
+    text::keyword("import")
         .ignore_then(file_name.padded())
         .then(items)
         .map(|(file, items)| Import { file, items })
@@ -89,6 +91,16 @@ fn import_parser() -> impl Parser<char, Import, Error = Simple<char>> {
 
 // -------------------- Objects --------------------
 
+/// An Object is either a struct or an enum because they have the same AST
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Object {
+    name: String,
+    fields: Vec<Field>,
+    props: Vec<ObjectProperties>,
+    derives: Vec<ObjectMethods>,
+}
+
+/// Note that `type_` may be the string `<Empty>`
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field {
     name: String,
@@ -110,17 +122,9 @@ pub enum ObjectMethods {
     Custom(String),
 }
 
-// -------------------- Structs --------------------
+// -------------------- Struct Parsing --------------------
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Struct {
-    name: String,
-    fields: Vec<Field>,
-    props: Vec<ObjectProperties>,
-    derives: Vec<ObjectMethods>,
-}
-
-pub fn struct_parser() -> impl Parser<char, Struct, Error = Simple<char>> {
+pub fn struct_parser() -> impl Parser<char, Object, Error = Simple<char>> {
     let ident = get_ident_parser();
 
     let camel_case = get_camel_case_parser();
@@ -129,7 +133,7 @@ pub fn struct_parser() -> impl Parser<char, Struct, Error = Simple<char>> {
 
     let fields = field.separated_by(just("::")).at_least(1);
 
-    let struct_property = choice((
+    let property = choice((
         text::keyword("Public")
             .to(ObjectProperties::Public)
             .labelled("Public"),
@@ -145,7 +149,7 @@ pub fn struct_parser() -> impl Parser<char, Struct, Error = Simple<char>> {
     .or(ident.map(ObjectMethods::Custom));
 
     let properties = just("is")
-        .ignore_then(struct_property.padded().repeated())
+        .ignore_then(property.padded().repeated())
         .or_not()
         .map(|opt| opt.unwrap_or_default());
 
@@ -154,18 +158,75 @@ pub fn struct_parser() -> impl Parser<char, Struct, Error = Simple<char>> {
         .or_not()
         .map(|opt| opt.unwrap_or_default());
 
-    just("struct")
+    text::keyword("struct")
         .ignore_then(camel_case)
         .then_ignore(just("="))
         .then(fields)
         .then(properties)
         .then(derives)
         .then_ignore(just(";"))
-        .map(|(((name, fields), properties), derives)| Struct {
+        .map(|(((name, fields), properties), derives)| Object {
             name,
             fields,
             props: properties,
             derives,
         })
-        .labelled("struct definition")
+}
+
+// -------------------- Enum Parsing --------------------
+
+pub fn enum_parser() -> impl Parser<char, Object, Error = Simple<char>> {
+    let ident = get_ident_parser();
+
+    let camel_case = get_camel_case_parser();
+
+    // Types are optional in an enum field, so they get mapped to `<Empty>`
+    let field = ident
+        .then(
+            ident
+                .or_not()
+                .map(|opt_type| opt_type.unwrap_or_else(|| "<Empty>".to_string())),
+        )
+        .map(|(name, type_)| Field { name, type_ });
+
+    let fields = field.separated_by(just("|")).at_least(1);
+
+    let property = choice((
+        text::keyword("Public")
+            .to(ObjectProperties::Public)
+            .labelled("Public"),
+        text::keyword("Export")
+            .to(ObjectProperties::Export)
+            .labelled("Export"),
+    ));
+
+    let struct_derives = choice((
+        text::keyword("Eq").to(ObjectMethods::Eq),
+        text::keyword("Log").to(ObjectMethods::Log),
+    ))
+    .or(ident.map(ObjectMethods::Custom));
+
+    let properties = just("is")
+        .ignore_then(property.padded().repeated())
+        .or_not()
+        .map(|opt| opt.unwrap_or_default());
+
+    let derives = just("derives")
+        .ignore_then(struct_derives.padded().repeated())
+        .or_not()
+        .map(|opt| opt.unwrap_or_default());
+
+    text::keyword("enum")
+        .ignore_then(camel_case)
+        .then_ignore(just("="))
+        .then(fields)
+        .then(properties)
+        .then(derives)
+        .then_ignore(just(";"))
+        .map(|(((name, fields), properties), derives)| Object {
+            name,
+            fields,
+            props: properties,
+            derives,
+        })
 }

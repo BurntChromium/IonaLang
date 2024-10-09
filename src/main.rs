@@ -8,6 +8,9 @@ fn main() {
     let input = r#"
         import math with sqrt pow;
         struct Employee = id int :: salary int is Public derives Log;
+        enum EmployeeType = Salaried Int | Contract
+	        is Public
+	        derives Log;
     "#;
 
     let file_id = "example.txt";
