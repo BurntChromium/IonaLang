@@ -337,13 +337,9 @@ fn expression_parser() -> impl Parser<char, Expression, Error = Simple<char>> {
 
         // Floats that look like 42.1 or 42.
         let float_with_decimal = text::int(10)
-            .then(just('.').then(text::digits(10)).or_not())
-            .map(|(whole, frac)| {
-                let s = match frac {
-                    Some((_, frac)) => format!("{}.{}", whole, frac),
-                    None => whole,
-                };
-                Expression::FloatLiteral(s.parse().unwrap())
+            .then(just('.').then(text::digits(10)))
+            .map(|(whole, (_, frac))| {
+                Expression::FloatLiteral(format!("{}.{}", whole, frac).parse().unwrap())
             })
             .padded();
 
@@ -381,22 +377,19 @@ fn expression_parser() -> impl Parser<char, Expression, Error = Simple<char>> {
             .map(|(name, field)| Expression::FieldAccess(ObjectField { name, field }))
             .padded();
 
-        let function_call = ident_parser()
+        let parenthesized_expr = expr.clone().delimited_by(just('('), just(')'));
+
+        let function_call = ident_parser() // Parse the function name
             .then(
-                expr.clone()
-                    .separated_by(just(' '))
-                    .at_least(1)
-                    .delimited_by(just('('), just(')'))
-                    .or(expr.clone().separated_by(just(' ')).at_least(1))
-                    .or_not(),
+                // Parse zero or more space-separated expressions as arguments
+                parenthesized_expr
+                    .or(expr.clone()) // An argument is either an expression or a parenthesized expression
+                    .repeated(), // Collect multiple arguments
             )
             .map(|(name, args)| {
-                Expression::FunctionCall(FunctionCall {
-                    name,
-                    expr: args.unwrap_or_default(),
-                })
-            })
-            .padded();
+                // Convert parsed name and arguments into a FunctionCall expression
+                Expression::FunctionCall(FunctionCall { name, expr: args })
+            });
 
         choice((
             list_literal,
@@ -437,15 +430,6 @@ mod tests {
 
     #[test]
     fn test_parse_expr_float_2() {
-        let input = "42.";
-        let result = expression_parser().parse(input);
-        assert!(result.is_ok());
-        let value = result.unwrap();
-        assert_eq!(Expression::FloatLiteral(42f64), value);
-    }
-
-    #[test]
-    fn test_parse_expr_float_3() {
         let input = "42f";
         let result = expression_parser().parse(input);
         assert!(result.is_ok());
@@ -478,6 +462,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_expr_fn_call_add_simple() {
+        let input = "add 1 2";
+        let result = expression_parser().parse(input);
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(
+            Expression::FunctionCall(FunctionCall {
+                name: "add".to_string(),
+                expr: vec![Expression::IntLiteral(1), Expression::IntLiteral(2)]
+            }),
+            value
+        );
+    }
+
+    #[test]
     fn test_parse_expr_tuple() {
         let input = "(1f, 2f, 3f)";
         let result = expression_parser().parse(input);
@@ -488,6 +487,50 @@ mod tests {
                         Expression::FloatLiteral(1f64),
                         Expression::FloatLiteral(2f64),
                         Expression::FloatLiteral(3f64)
+                    ]),
+                    value
+                );
+            }
+            Err(e) => {
+                println!("{:?}", e);
+                assert_eq!(true, false);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_expr_list_floats() {
+        let input = "[1f, 2f, 3f]";
+        let result = expression_parser().parse(input);
+        match result {
+            Ok(value) => {
+                assert_eq!(
+                    Expression::ListLiteral(vec![
+                        Expression::FloatLiteral(1f64),
+                        Expression::FloatLiteral(2f64),
+                        Expression::FloatLiteral(3f64)
+                    ]),
+                    value
+                );
+            }
+            Err(e) => {
+                println!("{:?}", e);
+                assert_eq!(true, false);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_expr_list_str() {
+        let input = "[\"a\", \"b\", \"c\"]";
+        let result = expression_parser().parse(input);
+        match result {
+            Ok(value) => {
+                assert_eq!(
+                    Expression::ListLiteral(vec![
+                        Expression::StrLiteral("a".to_string()),
+                        Expression::StrLiteral("b".to_string()),
+                        Expression::StrLiteral("c".to_string())
                     ]),
                     value
                 );
