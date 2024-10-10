@@ -7,12 +7,12 @@ use chumsky::prelude::*;
 pub const RESERVED_KEYWORDS: [&str; 6] = ["import", "is", "derives", "struct", "fn", "enum"];
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Types {
+pub enum Type {
     Integer,
     Float,
     String,
-    List(Box<Types>),
-    Tuple(Vec<Types>),
+    List(Box<Type>),
+    Tuple(Vec<Type>),
     Custom(String),
 }
 
@@ -36,20 +36,20 @@ fn camel_case_parser() -> impl Parser<char, String, Error = Simple<char>> {
         .padded()
 }
 
-fn type_parser() -> impl Parser<char, Types, Error = Simple<char>> {
+fn type_parser() -> impl Parser<char, Type, Error = Simple<char>> {
     recursive(|type_parser| {
         let ident = text::ident();
 
         let basic_type = choice((
-            text::keyword("int").to(Types::Integer),
-            text::keyword("float").to(Types::Float),
-            text::keyword("str").to(Types::String),
-            ident.map(Types::Custom),
+            text::keyword("int").to(Type::Integer),
+            text::keyword("float").to(Type::Float),
+            text::keyword("str").to(Type::String),
+            ident.map(Type::Custom),
         ));
 
         let list_type = just("List")
             .ignore_then(type_parser.clone().delimited_by(just('['), just(']')))
-            .map(|inner| Types::List(Box::new(inner)));
+            .map(|inner| Type::List(Box::new(inner)));
 
         let tuple_type = just("Tuple")
             .ignore_then(
@@ -59,7 +59,7 @@ fn type_parser() -> impl Parser<char, Types, Error = Simple<char>> {
                     .at_least(1)
                     .delimited_by(just('['), just(']')),
             )
-            .map(|inner| Types::Tuple(inner));
+            .map(|inner| Type::Tuple(inner));
 
         choice((list_type, tuple_type, basic_type))
     })
@@ -121,7 +121,7 @@ fn import_parser() -> impl Parser<char, Import, Error = Simple<char>> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TypeAlias {
     name: String,
-    alias_of: Types,
+    alias_of: Type,
 }
 
 fn alias_parser() -> impl Parser<char, TypeAlias, Error = Simple<char>> {
@@ -278,4 +278,224 @@ pub fn enum_parser() -> impl Parser<char, Object, Error = Simple<char>> {
             props: properties,
             derives,
         })
+}
+
+// -------------------- Statements --------------------
+
+struct VariableDeclaration {
+    name: String,
+    v_type: Type,
+    attributes: Vec<VariableAttribute>,
+    value: Vec<Expression>,
+}
+
+enum VariableAttribute {
+    Mutable,
+    ThreadSafe,
+}
+
+struct Conditional {
+    condition: Expression,
+    effect: Statement,
+}
+
+enum Statement {
+    VariableDecl(VariableDeclaration),
+    BareFuncCall(Expression),
+}
+
+// -------------------- Expressions --------------------
+
+#[derive(Debug, Clone, PartialEq)]
+struct ObjectField {
+    name: String,
+    field: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct FunctionCall {
+    name: String,
+    expr: Vec<Expression>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Expression {
+    IntLiteral(i64),
+    FloatLiteral(f64),
+    StrLiteral(String),
+    TupleLiteral(Vec<Expression>),
+    ListLiteral(Vec<Expression>),
+    FieldAccess(ObjectField),
+    FunctionCall(FunctionCall),
+}
+
+fn expression_parser() -> impl Parser<char, Expression, Error = Simple<char>> {
+    recursive(|expr| {
+        let int_literal = text::int(10)
+            .map(|s: String| Expression::IntLiteral(s.parse().unwrap()))
+            .padded();
+
+        // Floats that look like 42.1 or 42.
+        let float_with_decimal = text::int(10)
+            .then(just('.').then(text::digits(10)).or_not())
+            .map(|(whole, frac)| {
+                let s = match frac {
+                    Some((_, frac)) => format!("{}.{}", whole, frac),
+                    None => whole,
+                };
+                Expression::FloatLiteral(s.parse().unwrap())
+            })
+            .padded();
+
+        // Floats that look like 42f
+        let float_with_f = text::int(10)
+            .then(just('f'))
+            .map(|(base, _)| Expression::FloatLiteral(base.parse().unwrap()))
+            .padded();
+
+        let float_literal = float_with_decimal.or(float_with_f);
+
+        let str_literal = just('"')
+            .ignore_then(none_of('"').repeated())
+            .then_ignore(just('"'))
+            .collect::<String>()
+            .map(Expression::StrLiteral)
+            .padded();
+
+        let tuple_literal = expr
+            .clone()
+            .separated_by(just(','))
+            .delimited_by(just('('), just(')'))
+            .map(Expression::TupleLiteral)
+            .padded();
+
+        let list_literal = expr
+            .clone()
+            .separated_by(just(','))
+            .delimited_by(just('['), just(']'))
+            .map(Expression::ListLiteral)
+            .padded();
+
+        let field_access = ident_parser()
+            .then(just('.').ignore_then(ident_parser()))
+            .map(|(name, field)| Expression::FieldAccess(ObjectField { name, field }))
+            .padded();
+
+        let function_call = ident_parser()
+            .then(
+                expr.clone()
+                    .separated_by(just(' '))
+                    .at_least(1)
+                    .delimited_by(just('('), just(')'))
+                    .or(expr.clone().separated_by(just(' ')).at_least(1))
+                    .or_not(),
+            )
+            .map(|(name, args)| {
+                Expression::FunctionCall(FunctionCall {
+                    name,
+                    expr: args.unwrap_or_default(),
+                })
+            })
+            .padded();
+
+        choice((
+            list_literal,
+            tuple_literal,
+            float_literal,
+            field_access,
+            int_literal,
+            str_literal,
+            function_call,
+            expr.delimited_by(just('('), just(')')),
+        ))
+    })
+}
+
+// -------------------- Unit Tests --------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_expr_int() {
+        let input = "42";
+        let result = expression_parser().parse(input);
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(Expression::IntLiteral(42), value);
+    }
+
+    #[test]
+    fn test_parse_expr_float_1() {
+        let input = "42.27";
+        let result = expression_parser().parse(input);
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(Expression::FloatLiteral(42.27), value);
+    }
+
+    #[test]
+    fn test_parse_expr_float_2() {
+        let input = "42.";
+        let result = expression_parser().parse(input);
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(Expression::FloatLiteral(42f64), value);
+    }
+
+    #[test]
+    fn test_parse_expr_float_3() {
+        let input = "42f";
+        let result = expression_parser().parse(input);
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(Expression::FloatLiteral(42f64), value);
+    }
+
+    #[test]
+    fn test_parse_expr_str() {
+        let input = "\"forty two\"";
+        let result = expression_parser().parse(input);
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(Expression::StrLiteral("forty two".to_string()), value);
+    }
+
+    #[test]
+    fn test_parse_expr_field() {
+        let input = "obj.field";
+        let result = expression_parser().parse(input);
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(
+            Expression::FieldAccess(ObjectField {
+                name: "obj".to_string(),
+                field: "field".to_string()
+            }),
+            value
+        );
+    }
+
+    #[test]
+    fn test_parse_expr_tuple() {
+        let input = "(1f, 2f, 3f)";
+        let result = expression_parser().parse(input);
+        match result {
+            Ok(value) => {
+                assert_eq!(
+                    Expression::TupleLiteral(vec![
+                        Expression::FloatLiteral(1f64),
+                        Expression::FloatLiteral(2f64),
+                        Expression::FloatLiteral(3f64)
+                    ]),
+                    value
+                );
+            }
+            Err(e) => {
+                println!("{:?}", e);
+                assert_eq!(true, false);
+            }
+        }
+    }
 }
