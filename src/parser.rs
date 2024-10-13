@@ -36,15 +36,22 @@ fn camel_case_parser() -> impl Parser<char, String, Error = Simple<char>> {
         .padded()
 }
 
+fn snake_case_parser() -> impl Parser<char, String, Error = Simple<char>> {
+    filter(|c: &char| c.is_ascii_lowercase() || *c == '_')
+        .chain(
+            filter(|c: &char| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_').repeated(),
+        )
+        .collect::<String>()
+        .padded()
+        .labelled("snake_case identifier")
+}
+
 fn type_parser() -> impl Parser<char, Type, Error = Simple<char>> {
     recursive(|type_parser| {
-        let ident = text::ident();
-
         let basic_type = choice((
             text::keyword("int").to(Type::Integer),
             text::keyword("float").to(Type::Float),
             text::keyword("str").to(Type::String),
-            ident.map(Type::Custom),
         ));
 
         let list_type = just("List")
@@ -61,7 +68,9 @@ fn type_parser() -> impl Parser<char, Type, Error = Simple<char>> {
             )
             .map(|inner| Type::Tuple(inner));
 
-        choice((list_type, tuple_type, basic_type))
+        let custom_type = camel_case_parser().map(Type::Custom);
+
+        choice((basic_type, list_type, tuple_type, custom_type))
     })
 }
 
@@ -282,26 +291,61 @@ pub fn enum_parser() -> impl Parser<char, Object, Error = Simple<char>> {
 
 // -------------------- Statements --------------------
 
+#[derive(Debug, Clone, PartialEq)]
 struct VariableDeclaration {
     name: String,
     v_type: Type,
     attributes: Vec<VariableAttribute>,
-    value: Vec<Expression>,
+    value: Expression,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VariableAttribute {
     Mutable,
     ThreadSafe,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Conditional {
     condition: Expression,
     effect: Statement,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 enum Statement {
     VariableDecl(VariableDeclaration),
     BareFuncCall(Expression),
+}
+
+fn variable_declaration_parser() -> impl Parser<char, VariableDeclaration, Error = Simple<char>> {
+    let attribute = choice((
+        just("Mutable").to(VariableAttribute::Mutable),
+        just("ThreadSafe").to(VariableAttribute::ThreadSafe),
+    ));
+
+    let attributes = just("::")
+        .ignore_then(attribute.repeated())
+        .collect::<Vec<_>>()
+        .or_not()
+        .map(Option::unwrap_or_default);
+
+    let declaration = just("let")
+        .ignore_then(snake_case_parser())
+        .then_ignore(just("::"))
+        .then(type_parser().padded())
+        .then(attributes)
+        .then_ignore(just("="))
+        .then(expression_parser())
+        .map(
+            |(((name, v_type), attributes), value)| VariableDeclaration {
+                name,
+                v_type,
+                attributes,
+                value,
+            },
+        );
+
+    declaration
 }
 
 // -------------------- Expressions --------------------
@@ -411,6 +455,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_type_parser_int() {
+        assert_eq!(Type::Integer, type_parser().parse("int").unwrap())
+    }
+
+    #[test]
+    fn test_type_parser_str() {
+        assert_eq!(Type::String, type_parser().parse("str").unwrap())
+    }
+
+    #[test]
+    fn test_type_parser_float() {
+        assert_eq!(Type::Float, type_parser().parse("float").unwrap())
+    }
+
+    #[test]
+    fn test_type_parser_list1() {
+        assert_eq!(
+            Type::List(Box::new(Type::Integer)),
+            type_parser().parse("List[int]").unwrap()
+        )
+    }
+
+    #[test]
     fn test_parse_expr_int() {
         let input = "42";
         let result = expression_parser().parse(input);
@@ -461,6 +528,7 @@ mod tests {
         );
     }
 
+    // map add 2 (concat [1.0, 2f] [3f, 4.0])
     #[test]
     fn test_parse_expr_fn_call_add_simple() {
         let input = "add 1 2";
@@ -535,6 +603,27 @@ mod tests {
                     value
                 );
             }
+            Err(e) => {
+                println!("{:?}", e);
+                assert_eq!(true, false);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_var_decl_1() {
+        let input = "let x :: int = 5;";
+        let result = variable_declaration_parser().parse(input);
+        match result {
+            Ok(value) => assert_eq!(
+                VariableDeclaration {
+                    name: "x".to_string(),
+                    v_type: Type::Integer,
+                    attributes: vec![],
+                    value: Expression::IntLiteral(5)
+                },
+                value
+            ),
             Err(e) => {
                 println!("{:?}", e);
                 assert_eq!(true, false);
