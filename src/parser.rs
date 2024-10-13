@@ -14,6 +14,7 @@ pub enum Type {
     List(Box<Type>),
     Tuple(Vec<Type>),
     Custom(String),
+    Void,
 }
 
 /// Parsing identifiers (stringy names that aren't reserved)
@@ -54,15 +55,15 @@ fn type_parser() -> impl Parser<char, Type, Error = Simple<char>> {
             text::keyword("str").to(Type::String),
         ));
 
-        let list_type = just("List")
+        let list_type = text::keyword("List")
             .ignore_then(type_parser.clone().delimited_by(just('['), just(']')))
             .map(|inner| Type::List(Box::new(inner)));
 
-        let tuple_type = just("Tuple")
+        let tuple_type = text::keyword("Tuple")
             .ignore_then(
                 type_parser
                     .clone()
-                    .separated_by(just(','))
+                    .separated_by(just(',').padded())
                     .at_least(1)
                     .delimited_by(just('['), just(']')),
             )
@@ -76,12 +77,13 @@ fn type_parser() -> impl Parser<char, Type, Error = Simple<char>> {
 
 // -------------------- AST --------------------
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ASTNode {
     ImportStatement(Import),
     TypeAliasDeclaration(TypeAlias),
     StructDeclaration(Object),
     EnumDeclaration(Object),
+    FunctionDeclaration(FunctionDeclaration),
 }
 
 fn ast_parser() -> impl Parser<char, Vec<ASTNode>, Error = Simple<char>> {
@@ -89,8 +91,13 @@ fn ast_parser() -> impl Parser<char, Vec<ASTNode>, Error = Simple<char>> {
     let alias_node = alias_parser().map(ASTNode::TypeAliasDeclaration);
     let struct_node = struct_parser().map(ASTNode::StructDeclaration);
     let enum_node = enum_parser().map(ASTNode::EnumDeclaration);
+    let function_node = function_parser().map(ASTNode::FunctionDeclaration);
 
-    let node = import_node.or(alias_node).or(struct_node).or(enum_node);
+    let node = import_node
+        .or(alias_node)
+        .or(struct_node)
+        .or(enum_node)
+        .or(function_node);
 
     node.padded().repeated().then_ignore(end())
 }
@@ -164,7 +171,7 @@ pub struct Object {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field {
     name: String,
-    type_: String,
+    type_: Type,
 }
 
 /// Properties for data types (Structs and Enums)
@@ -188,7 +195,7 @@ pub fn struct_parser() -> impl Parser<char, Object, Error = Simple<char>> {
     let camel_case = camel_case_parser();
 
     let field = ident_parser()
-        .then(ident_parser())
+        .then(type_parser())
         .map(|(name, type_)| Field { name, type_ });
 
     let fields = field.separated_by(just("::")).at_least(1);
@@ -241,9 +248,9 @@ pub fn enum_parser() -> impl Parser<char, Object, Error = Simple<char>> {
     // Types are optional in an enum field, so they get mapped to `<Empty>`
     let field = ident_parser()
         .then(
-            ident_parser()
+            type_parser()
                 .or_not()
-                .map(|opt_type| opt_type.unwrap_or_else(|| "<Empty>".to_string())),
+                .map(|opt_type| opt_type.unwrap_or_else(|| Type::Void)),
         )
         .map(|(name, type_)| Field { name, type_ });
 
@@ -287,6 +294,132 @@ pub fn enum_parser() -> impl Parser<char, Object, Error = Simple<char>> {
             props: properties,
             derives,
         })
+}
+
+// -------------------- Functions --------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FunctionProperties {
+    Public,
+    Export,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FunctionPermissions {
+    ReadIO,
+    WriteIO,
+    ReadFS,  // todo: allow scoping to specific paths?
+    WriteFS, // todo: allow scoping to specific paths?
+    HTTPAny,
+    HTTPGet,
+    HTTPPost,
+    Any,
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionDeclaration {
+    name: String,
+    args: Vec<Field>,
+    return_type: Type,
+    is: Vec<FunctionProperties>,
+    derives: Vec<FunctionPermissions>,
+    contract_in: Option<Expression>,
+    contract_out: Option<Expression>,
+    body: Vec<Statement>,
+    returns: Expression,
+}
+
+pub fn function_parser() -> impl Parser<char, FunctionDeclaration, Error = Simple<char>> {
+    let field = ident_parser()
+        .then(type_parser())
+        .map(|(name, type_)| Field { name, type_ });
+
+    let fields = field.separated_by(just("::")).at_least(1);
+
+    let function_header = text::keyword("fn")
+        .ignore_then(snake_case_parser())
+        .then_ignore(just('=').padded())
+        .then(fields)
+        .then_ignore(just("->").padded())
+        .then(type_parser());
+
+    let prop_parser = choice((
+        text::keyword("Public").to(FunctionProperties::Public),
+        text::keyword("Export").to(FunctionProperties::Export),
+    ));
+
+    let requirements_parser = choice((
+        text::keyword("ReadIO").to(FunctionPermissions::ReadIO),
+        text::keyword("WriteIO").to(FunctionPermissions::WriteIO),
+        text::keyword("ReadFS").to(FunctionPermissions::ReadFS),
+        text::keyword("WriteFS").to(FunctionPermissions::WriteFS),
+        text::keyword("HTTPAny").to(FunctionPermissions::HTTPAny),
+        text::keyword("HTTPGet").to(FunctionPermissions::HTTPGet),
+        text::keyword("HTTPPost").to(FunctionPermissions::HTTPPost),
+        text::keyword("Any").to(FunctionPermissions::Any),
+    ))
+    .or(camel_case_parser().map(FunctionPermissions::Custom));
+
+    let function_props = text::keyword("Is:")
+        .padded()
+        .ignore_then(prop_parser.padded().repeated())
+        .or_not()
+        .map(|props| props.unwrap_or_default());
+
+    let function_requirements = text::keyword("Uses:")
+        .padded()
+        .ignore_then(requirements_parser.padded().repeated())
+        .or_not()
+        .map(|reqs| reqs.unwrap_or_default());
+
+    let contract_in = text::keyword("In:")
+        .padded()
+        .ignore_then(expression_parser())
+        .then_ignore(just(';'))
+        .padded();
+
+    let contract_out = text::keyword("Out:")
+        .padded()
+        .ignore_then(expression_parser())
+        .then_ignore(just(';'))
+        .padded();
+
+    let function_body = just('{')
+        .padded()
+        .ignore_then(
+            function_props
+                .then(function_requirements)
+                .then(contract_in.or_not())
+                .then(contract_out.or_not())
+                .then(statement_parser().repeated())
+                .then(
+                    just("return")
+                        .padded()
+                        .ignore_then(expression_parser())
+                        .then_ignore(just(';')),
+                ),
+        )
+        .then_ignore(just('}').padded());
+
+    function_header.then(function_body).map(
+        |(
+            ((name, args), return_type),
+            (((((is, derives), contract_in), contract_out), body), returns),
+        )| {
+            FunctionDeclaration {
+                name,
+                args,
+                return_type,
+                is,
+                derives,
+                contract_in,
+                contract_out,
+                body,
+                returns,
+            }
+        },
+    )
 }
 
 // -------------------- Statements --------------------
@@ -348,6 +481,12 @@ fn variable_declaration_parser() -> impl Parser<char, VariableDeclaration, Error
     declaration
 }
 
+fn statement_parser() -> impl Parser<char, Statement, Error = Simple<char>> {
+    let var_decl = variable_declaration_parser().map(Statement::VariableDecl);
+    let bare_fun = expression_parser().map(Statement::BareFuncCall);
+    var_decl.or(bare_fun)
+}
+
 // -------------------- Expressions --------------------
 
 #[derive(Debug, Clone, PartialEq)]
@@ -367,13 +506,14 @@ enum Expression {
     IntLiteral(i64),
     FloatLiteral(f64),
     StrLiteral(String),
+    Identifier(String),
     TupleLiteral(Vec<Expression>),
     ListLiteral(Vec<Expression>),
-    FieldAccess(ObjectField),
-    FunctionCall(FunctionCall),
+    FieldAccess(Box<Expression>, String),
+    Group(Vec<Expression>),
 }
 
-fn expression_parser() -> impl Parser<char, Expression, Error = Simple<char>> {
+fn expression_parser() -> impl Parser<char, Vec<Expression>, Error = Simple<char>> {
     recursive(|expr| {
         let int_literal = text::int(10)
             .map(|s: String| Expression::IntLiteral(s.parse().unwrap()))
@@ -474,6 +614,22 @@ mod tests {
         assert_eq!(
             Type::List(Box::new(Type::Integer)),
             type_parser().parse("List[int]").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_type_parser_tuple1() {
+        assert_eq!(
+            Type::Tuple(vec![Type::Integer, Type::String]),
+            type_parser().parse("Tuple[int, str]").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_type_parser_custom1() {
+        assert_eq!(
+            Type::Custom("Employee".to_string()),
+            type_parser().parse("Employee").unwrap()
         )
     }
 
@@ -621,6 +777,43 @@ mod tests {
                     v_type: Type::Integer,
                     attributes: vec![],
                     value: Expression::IntLiteral(5)
+                },
+                value
+            ),
+            Err(e) => {
+                println!("{:?}", e);
+                assert_eq!(true, false);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_1() {
+        let input = r#"fn foo = a int :: b int -> int {
+            Is: Public;
+
+            return div a b;
+        }"#;
+        let result = function_parser().parse(input);
+        match result {
+            Ok(value) => assert_eq!(
+                FunctionDeclaration {
+                    name: "foo".to_string(),
+                    args: vec![Field{ name: "a".to_string(), type_: Type::Integer}, Field{ name: "b".to_string(), type_: Type::Integer}],
+                    return_type: Type::Integer,
+                    is: vec![FunctionProperties::Public],
+                    derives: vec![],
+                    contract_in: None,
+                    contract_out: None,
+                    body: vec![],
+                    returns: Expression::FunctionCall(
+                        FunctionCall {
+                            name: "div".to_string(),
+                            expr: vec![
+                                Expression::
+                            ]
+                        }
+                    )
                 },
                 value
             ),
