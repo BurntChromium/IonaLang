@@ -11,3 +11,10 @@ struct Employee = id int :: salary Salary
 enum EmployeeType = Salaried int | Contract
 	is Public
 	derives Log;
+
+fn foo = a int :: b int -> int {
+	Is: Public;
+	In: gt b 0;
+
+	return div (add a 5) b;
+}
