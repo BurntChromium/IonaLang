@@ -397,14 +397,28 @@ pub fn function_parser() -> impl Parser<char, FunctionDeclaration, Error = Simpl
     let function_body = just('{')
         .padded()
         .ignore_then(
-            function_props
-                .then(function_requirements)
-                .then(contract_in.or_not())
-                .then(contract_out.or_not())
-                .then(statement_parser().repeated())
-                .then(returns.or_not()),
+            choice((
+                function_props
+                    .then(function_requirements)
+                    .then(contract_in.or_not())
+                    .then(contract_out.or_not())
+                    .then(statement_parser().repeated())
+                    .then(returns.or_not()),
+                just('}').not()
+                    .repeated()
+                    .at_least(1)
+                    .to(Default::default())
+                    .map(|_| (((((vec![], vec![]), None), None), vec![]), None))
+                    .labelled("malformed function body"),
+            ))
         )
-        .then_ignore(just("}").padded());
+        .then_ignore(just("}").padded())
+        .recover_with(nested_delimiters(
+            '{',
+            '}',
+            [('(', ')'), ('[', ']')],
+            |_| (((((vec![], vec![]), None), None), vec![]), None)
+        ));
 
     function_header.then(function_body).map(
         |(
@@ -495,46 +509,45 @@ fn statement_parser() -> impl Parser<char, Statement, Error = Simple<char>> {
 
 #[derive(Debug, Clone, PartialEq)]
 struct ObjectField {
-    name: Box<Expression>,
+    name: Box<ExpressionTerm>,
     field: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct FunctionCall {
-    name: String,
-    expr: Vec<Expression>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum Expression {
+enum ExpressionTerm {
     IntLiteral(i64),
     FloatLiteral(f64),
     StrLiteral(String),
-    TupleLiteral(Vec<Expression>),
-    ListLiteral(Vec<Expression>),
+    TupleLiteral(Vec<ExpressionTerm>),
+    ListLiteral(Vec<ExpressionTerm>),
     FieldAccess(ObjectField),
-    FunctionCall(FunctionCall),
     Identifier(String),
 }
 
+type Expression = Vec<ExpressionTerm>;
+
 fn expression_parser() -> impl Parser<char, Expression, Error = Simple<char>> {
+    expression_term_parser().padded().repeated().padded()
+}
+
+fn expression_term_parser() -> impl Parser<char, ExpressionTerm, Error = Simple<char>> {
     recursive(|expr| {
         let int_literal = text::int(10)
-            .map(|s: String| Expression::IntLiteral(s.parse().unwrap()))
+            .map(|s: String| ExpressionTerm::IntLiteral(s.parse().unwrap()))
             .padded();
 
         // Floats that look like 42.1 or 42.
         let float_with_decimal = text::int(10)
             .then(just('.').then(text::digits(10)))
             .map(|(whole, (_, frac))| {
-                Expression::FloatLiteral(format!("{}.{}", whole, frac).parse().unwrap())
+                ExpressionTerm::FloatLiteral(format!("{}.{}", whole, frac).parse().unwrap())
             })
             .padded();
 
         // Floats that look like 42f
         let float_with_f = text::int(10)
             .then(just('f'))
-            .map(|(base, _)| Expression::FloatLiteral(base.parse().unwrap()))
+            .map(|(base, _)| ExpressionTerm::FloatLiteral(base.parse().unwrap()))
             .padded();
 
         let float_literal = float_with_decimal.or(float_with_f);
@@ -543,46 +556,38 @@ fn expression_parser() -> impl Parser<char, Expression, Error = Simple<char>> {
             .ignore_then(none_of('"').repeated())
             .then_ignore(just('"'))
             .collect::<String>()
-            .map(Expression::StrLiteral)
+            .map(ExpressionTerm::StrLiteral)
             .padded();
 
         let tuple_literal = expr
             .clone()
             .separated_by(just(','))
             .delimited_by(just('('), just(')'))
-            .map(Expression::TupleLiteral)
+            .map(ExpressionTerm::TupleLiteral)
             .padded();
 
         let list_literal = expr
             .clone()
             .separated_by(just(','))
             .delimited_by(just('['), just(']'))
-            .map(Expression::ListLiteral)
+            .map(ExpressionTerm::ListLiteral)
             .padded();
 
         let field_access = ident_parser()
             .then(just('.').ignore_then(ident_parser()))
             .map(|(name, field)| {
-                Expression::FieldAccess(ObjectField {
-                    name: Box::new(Expression::Identifier(name)),
+                ExpressionTerm::FieldAccess(ObjectField {
+                    name: Box::new(ExpressionTerm::Identifier(name)),
                     field,
                 })
             })
             .padded();
 
-        let parenthesized_expr = expr.clone().delimited_by(just('('), just(')'));
+        let identifier = ident_parser()
+            .map(ExpressionTerm::Identifier)
+            .padded();
 
-        let function_call = ident_parser() // Parse the function name
-            .then(
-                // Parse zero or more space-separated expressions as arguments
-                parenthesized_expr
-                    .or(expr.clone()) // An argument is either an expression or a parenthesized expression
-                    .repeated(), // Collect multiple arguments
-            )
-            .map(|(name, args)| {
-                // Convert parsed name and arguments into a FunctionCall expression
-                Expression::FunctionCall(FunctionCall { name, expr: args })
-            });
+        let parenthesized_expr = expr.clone().delimited_by(just('('), just(')'));
 
         choice((
             list_literal,
@@ -591,8 +596,8 @@ fn expression_parser() -> impl Parser<char, Expression, Error = Simple<char>> {
             field_access,
             int_literal,
             str_literal,
-            function_call,
-            expr.delimited_by(just('('), just(')')),
+            identifier,
+            parenthesized_expr,
         ))
         .then_ignore(just(';').or_not()) // Stop parsing when a semicolon is encountered
     })
@@ -649,7 +654,7 @@ mod tests {
         let result = expression_parser().parse(input);
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(Expression::IntLiteral(42), value);
+        assert_eq!(ExpressionTerm::IntLiteral(42), value[0]);
     }
 
     #[test]
@@ -658,7 +663,7 @@ mod tests {
         let result = expression_parser().parse(input);
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(Expression::FloatLiteral(42.27), value);
+        assert_eq!(ExpressionTerm::FloatLiteral(42.27), value[0]);
     }
 
     #[test]
@@ -667,7 +672,7 @@ mod tests {
         let result = expression_parser().parse(input);
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(Expression::FloatLiteral(42f64), value);
+        assert_eq!(ExpressionTerm::FloatLiteral(42f64), value[0]);
     }
 
     #[test]
@@ -676,7 +681,10 @@ mod tests {
         let result = expression_parser().parse(input);
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(Expression::StrLiteral("forty two".to_string()), value);
+        assert_eq!(
+            ExpressionTerm::StrLiteral("forty two".to_string()),
+            value[0]
+        );
     }
 
     #[test]
@@ -686,15 +694,14 @@ mod tests {
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(
-            Expression::FieldAccess(ObjectField {
-                name: Box::new(Expression::Identifier("obj".to_string())),
+            ExpressionTerm::FieldAccess(ObjectField {
+                name: Box::new(ExpressionTerm::Identifier("obj".to_string())),
                 field: "field".to_string()
             }),
-            value
+            value[0]
         );
     }
 
-    // map add 2 (concat [1.0, 2f] [3f, 4.0])
     #[test]
     fn test_parse_expr_fn_call_add_simple() {
         let input = "add 1 2";
@@ -702,10 +709,11 @@ mod tests {
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(
-            Expression::FunctionCall(FunctionCall {
-                name: "add".to_string(),
-                expr: vec![Expression::IntLiteral(1), Expression::IntLiteral(2)]
-            }),
+            vec![
+                ExpressionTerm::Identifier("add".to_string()),
+                ExpressionTerm::IntLiteral(1),
+                ExpressionTerm::IntLiteral(2),
+            ],
             value
         );
     }
@@ -717,12 +725,12 @@ mod tests {
         match result {
             Ok(value) => {
                 assert_eq!(
-                    Expression::TupleLiteral(vec![
-                        Expression::FloatLiteral(1f64),
-                        Expression::FloatLiteral(2f64),
-                        Expression::FloatLiteral(3f64)
+                    ExpressionTerm::TupleLiteral(vec![
+                        ExpressionTerm::FloatLiteral(1f64),
+                        ExpressionTerm::FloatLiteral(2f64),
+                        ExpressionTerm::FloatLiteral(3f64)
                     ]),
-                    value
+                    value[0]
                 );
             }
             Err(e) => {
@@ -739,12 +747,12 @@ mod tests {
         match result {
             Ok(value) => {
                 assert_eq!(
-                    Expression::ListLiteral(vec![
-                        Expression::FloatLiteral(1f64),
-                        Expression::FloatLiteral(2f64),
-                        Expression::FloatLiteral(3f64)
+                    ExpressionTerm::ListLiteral(vec![
+                        ExpressionTerm::FloatLiteral(1f64),
+                        ExpressionTerm::FloatLiteral(2f64),
+                        ExpressionTerm::FloatLiteral(3f64)
                     ]),
-                    value
+                    value[0]
                 );
             }
             Err(e) => {
@@ -761,12 +769,12 @@ mod tests {
         match result {
             Ok(value) => {
                 assert_eq!(
-                    Expression::ListLiteral(vec![
-                        Expression::StrLiteral("a".to_string()),
-                        Expression::StrLiteral("b".to_string()),
-                        Expression::StrLiteral("c".to_string())
+                    ExpressionTerm::ListLiteral(vec![
+                        ExpressionTerm::StrLiteral("a".to_string()),
+                        ExpressionTerm::StrLiteral("b".to_string()),
+                        ExpressionTerm::StrLiteral("c".to_string())
                     ]),
-                    value
+                    value[0]
                 );
             }
             Err(e) => {
@@ -786,7 +794,7 @@ mod tests {
                     name: "x".to_string(),
                     v_type: Type::Integer,
                     attributes: vec![],
-                    value: Expression::IntLiteral(5)
+                    value: vec![ExpressionTerm::IntLiteral(5)]
                 },
                 value
             ),
@@ -801,8 +809,12 @@ mod tests {
     fn test_parse_fn_1() {
         let input = r#"fn foo = a int :: b int -> int {
             Is: Public;
+            In: gt a 0;
+            Out: gt this 0;
+            
+            let x :: int = 5;
 
-            return div a b;
+            return 5;
         }"#;
         let result = function_parser().parse(input);
         match result {
@@ -825,13 +837,11 @@ mod tests {
                     contract_in: None,
                     contract_out: None,
                     body: vec![],
-                    returns: Some(Expression::FunctionCall(FunctionCall {
-                        name: "div".to_string(),
-                        expr: vec![
-                            Expression::Identifier("a".to_string()),
-                            Expression::Identifier("b".to_string())
-                        ]
-                    }))
+                    returns: Some(vec![
+                        ExpressionTerm::Identifier("div".to_string()),
+                        ExpressionTerm::Identifier("a".to_string()),
+                        ExpressionTerm::Identifier("b".to_string()),
+                    ])
                 },
                 value
             ),
