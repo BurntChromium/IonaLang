@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     // Start timer
     let now = Instant::now();
-    println!("input file is: \n{}", program_root);
+    // println!("input file is: \n{}", program_root);
     // Parse the file
     match parse_source(&program_root) {
         Ok(struct_def) => {
