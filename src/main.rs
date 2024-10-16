@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod diagnostics;
 mod lexer;
 mod parser;
@@ -35,7 +37,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("time elapsed: {:?}", Instant::now() - now);
     // Parse the file
     let mut parser = Parser::new(lexer.token_stream);
-    let out = parser.parse_struct_declaration();
-    println!("{:#?}", out);
+    let out = parser.parse_struct();
+    // Display errors
+    if out.output.is_none() {
+        for diagnostic in out.diagnostics {
+            println!("{}", diagnostic.display(&program_root));
+        }
+    } else {
+        println!("{:#?}", out.output);
+    }
     Ok(())
 }

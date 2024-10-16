@@ -26,21 +26,52 @@ impl Diagnostic {
             references: None,
         }
     }
+
+    pub fn display(&self, source: &str) -> String {
+        format!(
+            "{:?} in {}:{}:{}\n{}",
+            self.level,
+            self.position.filename,
+            self.position.line,
+            self.position.column,
+            get_context(&self.position, source, &self.message)
+        )
+    }
 }
 
-/// Given a SourcePosition and an input file (string), get the context from the input file
-fn get_context(position: &SourcePosition, input: &str) -> String {
+/// Get the context from the input file
+fn get_context(position: &SourcePosition, input: &str, message: &str) -> String {
     let mut lines = input.lines();
-    let mut buffer = "".to_string();
+    let mut buffer = String::new();
+
+    // Get the line before
     if position.line > 0 {
-        buffer += lines.nth(position.line - 1).unwrap();
-    }
-    buffer += lines.next().unwrap();
-    match lines.next() {
-        Some(line) => {
-            buffer += line;
+        if let Some(line) = lines.nth(position.line - 1) {
+            buffer.push_str(&format!(" {} |", position.line - 1));
+            buffer.push_str(line);
+            buffer.push('\n'); // Add a newline after the line
         }
-        None => {}
     }
+
+    // Get the primary line, and add an error message
+    if let Some(line) = lines.next() {
+        let align = format!(" {} |", position.line);
+        buffer.push_str(&align);
+        buffer.push_str(line);
+        buffer.push('\n'); // Add a newline after the line
+                           // Add spaces until we reach the column, then place a caret (`^`)
+        let caret_position = " ".repeat(position.column + align.len()) + "^";
+        buffer.push_str(&caret_position);
+        buffer.push_str(message);
+        buffer.push('\n');
+    }
+
+    // Get the line after
+    if let Some(line) = lines.next() {
+        buffer.push_str(&format!(" {} |", position.line + 1));
+        buffer.push_str(line);
+        buffer.push('\n'); // Add a newline after the line
+    }
+
     buffer
 }
