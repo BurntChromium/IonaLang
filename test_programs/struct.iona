@@ -1,0 +1,10 @@
+struct Animal {
+	legs: Int,
+	hair: Bool,
+	feathers: Bool
+	
+	@metadata {
+		Is: [Public]
+		Derives: [Eq, Show]
+	}
+}
