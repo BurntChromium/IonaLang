@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod codegen_c;
 mod diagnostics;
 mod lexer;
 mod parser;
@@ -22,12 +23,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     // Try to open linked file
     let maybe_text = fs::read_to_string(file);
-    let program_root: String;
-    if maybe_text.is_err() {
+    let program_root: String = if maybe_text.is_err() {
         return Err(format!("unable to find file {}, aborting compilation", file).into());
     } else {
-        program_root = maybe_text.unwrap();
-    }
+        maybe_text.unwrap()
+    };
     println!("input file is: \n{}", program_root);
     // Start timer
     let now = Instant::now();
@@ -43,8 +43,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         for diagnostic in out.diagnostics {
             println!("{}", diagnostic.display(&program_root));
         }
-    } else {
-        println!("{:#?}", out.output);
+        return Err("could not compile due to parsing errors".into());
     }
+    let ast = [out.output.unwrap()];
+    fs::write("gen/test_case.c", codegen_c::write_all(file, ast.iter()))
+        .expect("Unable to write file");
     Ok(())
 }

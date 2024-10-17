@@ -10,6 +10,7 @@ pub struct Parser {
     offset: usize,
 }
 
+/// Golang-esque error handling to allow multiple returns
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParserOutput<T> {
     pub output: Option<T>,
@@ -28,6 +29,16 @@ impl<T> ParserOutput<T> {
         ParserOutput {
             output: None,
             diagnostics,
+        }
+    }
+
+    /// Errors can be safely cast from one type to another because only the output varies
+    ///
+    /// This lets return a parser error from an "inner" parser error that returns type T from an outer parser that returns type O
+    fn transmute_error<O>(self) -> ParserOutput<O> {
+        ParserOutput {
+            output: None,
+            diagnostics: self.diagnostics,
         }
     }
 }
@@ -107,15 +118,16 @@ pub enum DataTraits {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
-    name: String,
-    field_type: Type,
+    pub name: String,
+    pub field_type: Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Struct {
-    fields: Vec<Field>,
-    properties: Vec<DataProperties>,
-    traits: Vec<DataTraits>,
+    pub name: String,
+    pub fields: Vec<Field>,
+    pub properties: Vec<DataProperties>,
+    pub traits: Vec<DataTraits>,
 }
 
 // -------------------- Parsers --------------------
@@ -238,11 +250,16 @@ impl Parser {
     }
 
     pub fn parse_struct(&mut self) -> ParserOutput<Struct> {
-        self.parse_struct_declaration()
-            .and_then(|_| self.parse_list(|p| p.with_whitespace(|p| p.parse_field())))
+        let name = self.parse_struct_declaration();
+        if name.output.is_none() {
+            return name.transmute_error::<Struct>();
+        }
+        let struct_name = name.output.clone().unwrap();
+        name.and_then(|_| self.parse_list(|p| p.with_whitespace(|p| p.parse_field())))
             .and_then(|fields| {
                 let metadata = self.parse_metadata();
                 metadata.map(|(properties, traits)| Struct {
+                    name: struct_name,
                     fields,
                     properties,
                     traits,
