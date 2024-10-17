@@ -2,6 +2,8 @@
 use crate::diagnostics::Diagnostic;
 use crate::lexer::{Symbol, Token};
 
+// -------------------- Parser Object --------------------
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parser {
     tokens: Vec<Token>,
@@ -81,21 +83,79 @@ impl<T> ParserOutputExt<T> for ParserOutput<T> {
     }
 }
 
+// -------------------- AST --------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Type {
+    Integer,
+    String,
+    Boolean,
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataProperties {
+    Public,
+    Export,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataTraits {
+    Eq,
+    Show,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     name: String,
-    type_: String,
+    field_type: Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Struct {
     fields: Vec<Field>,
-    properties: Vec<String>,
-    traits: Vec<String>,
+    properties: Vec<DataProperties>,
+    traits: Vec<DataTraits>,
 }
 
+// -------------------- Parsers --------------------
+
 impl Parser {
-    pub fn parse_struct_declaration(&mut self) -> ParserOutput<String> {
+    fn parse_type(&mut self) -> ParserOutput<Type> {
+        self.expect_identifier()
+            .and_then(|name| match name.as_str() {
+                "Int" => ParserOutput::okay(Type::Integer),
+                "Str" => ParserOutput::okay(Type::String),
+                "Bool" => ParserOutput::okay(Type::Boolean),
+                _ => ParserOutput::okay(Type::Custom(name)),
+            })
+    }
+
+    fn parse_data_properties(&mut self) -> ParserOutput<DataProperties> {
+        self.expect_identifier()
+            .and_then(|name| match name.as_str() {
+                "Public" => ParserOutput::okay(DataProperties::Public),
+                "Export" => ParserOutput::okay(DataProperties::Export),
+                other => self.single_error::<DataProperties>(&format!(
+                    "expected 'Public' or 'Export', but received {}",
+                    other
+                )),
+            })
+    }
+
+    fn parse_data_traits(&mut self) -> ParserOutput<DataTraits> {
+        self.expect_identifier()
+            .and_then(|name| match name.as_str() {
+                "Eq" => ParserOutput::okay(DataTraits::Eq),
+                "Show" => ParserOutput::okay(DataTraits::Show),
+                other => self.single_error::<DataTraits>(&format!(
+                    "expected 'Eq' or 'Show', but received {}",
+                    other
+                )),
+            })
+    }
+
+    fn parse_struct_declaration(&mut self) -> ParserOutput<String> {
         self.expect_token(Symbol::Struct)
             .and_then(|_| self.with_whitespace(|p| p.expect_identifier()))
             .and_then(|name| {
@@ -103,23 +163,40 @@ impl Parser {
             })
     }
 
-    pub fn parse_field(&mut self) -> ParserOutput<Field> {
+    fn parse_field(&mut self) -> ParserOutput<Field> {
         self.expect_identifier().and_then(|name| {
             self.with_whitespace(|p| p.expect_token(Symbol::Colon))
-                .and_then(|_| self.with_whitespace(|p| p.expect_identifier()))
-                .map(|type_| Field { name, type_ })
+                .and_then(|_| self.with_whitespace(|p| p.parse_type()))
+                .map(|type_| Field {
+                    name,
+                    field_type: type_,
+                })
         })
     }
 
-    fn parse_metadata_entry(&mut self, expected_symbol: Symbol) -> ParserOutput<Vec<String>> {
+    fn parse_metadata_data_properties(
+        &mut self,
+        expected_symbol: Symbol,
+    ) -> ParserOutput<Vec<DataProperties>> {
         self.expect_token(expected_symbol)
             .and_then(|_| self.with_whitespace(|p| p.expect_token(Symbol::Colon)))
             .and_then(|_| self.with_whitespace(|p| p.expect_token(Symbol::BracketOpen)))
-            .and_then(|_| self.parse_list(|p| p.expect_identifier()))
+            .and_then(|_| self.parse_list(|p| p.parse_data_properties()))
             .and_then(|values| self.expect_token(Symbol::BracketClose).map(|_| values))
     }
 
-    fn parse_metadata(&mut self) -> ParserOutput<(Vec<String>, Vec<String>)> {
+    fn parse_metadata_data_traits(
+        &mut self,
+        expected_symbol: Symbol,
+    ) -> ParserOutput<Vec<DataTraits>> {
+        self.expect_token(expected_symbol)
+            .and_then(|_| self.with_whitespace(|p| p.expect_token(Symbol::Colon)))
+            .and_then(|_| self.with_whitespace(|p| p.expect_token(Symbol::BracketOpen)))
+            .and_then(|_| self.parse_list(|p| p.parse_data_traits()))
+            .and_then(|values| self.expect_token(Symbol::BracketClose).map(|_| values))
+    }
+
+    fn parse_metadata(&mut self) -> ParserOutput<(Vec<DataProperties>, Vec<DataTraits>)> {
         self.expect_token(Symbol::Tag)
             .and_then(|_| self.expect_token(Symbol::Metadata))
             .and_then(|_| self.with_whitespace(|p| p.expect_token(Symbol::BraceOpen)))
@@ -132,12 +209,12 @@ impl Parser {
                     self.skip_whitespace();
                     match self.peek().symbol {
                         Symbol::Properties => {
-                            let result = self.parse_metadata_entry(Symbol::Properties);
+                            let result = self.parse_metadata_data_properties(Symbol::Properties);
                             properties.extend(result.output.unwrap_or_default());
                             diagnostics.extend(result.diagnostics);
                         }
                         Symbol::Traits => {
-                            let result = self.parse_metadata_entry(Symbol::Traits);
+                            let result = self.parse_metadata_data_traits(Symbol::Traits);
                             traits.extend(result.output.unwrap_or_default());
                             diagnostics.extend(result.diagnostics);
                         }
@@ -178,6 +255,8 @@ impl Parser {
     }
 }
 
+// -------------------- Parsing Utilities --------------------
+
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser { offset: 0, tokens }
@@ -197,6 +276,14 @@ impl Parser {
         let token = &self.tokens[self.offset];
         self.offset += 1;
         token
+    }
+
+    /// Helper method to create a single error from a given message
+    fn single_error<T>(&self, message: &str) -> ParserOutput<T> {
+        ParserOutput::err(vec![Diagnostic::new_error_simple(
+            message,
+            &self.peek().pos,
+        )])
     }
 
     fn skip_whitespace(&mut self) {
