@@ -34,13 +34,13 @@ impl Diagnostic {
             self.position.filename,
             self.position.line,
             self.position.column,
-            get_context(&self.position, source, &self.message)
+            create_rich_diagnostic_message(&self.position, source, &self.message)
         )
     }
 }
 
-/// Get the context from the input file
-fn get_context(position: &SourcePosition, input: &str, message: &str) -> String {
+/// Create a nice diagnostic message that includes the source code context
+fn create_rich_diagnostic_message(position: &SourcePosition, input: &str, message: &str) -> String {
     let mut lines = input.lines();
     let mut buffer = String::new();
 

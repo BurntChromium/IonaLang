@@ -162,5 +162,9 @@ impl Lexer {
                 }
             }
         }
+        // Add trailing whitespace to avoid over-running the token boundary during parsing
+        self.position.line += 1;
+        self.position.column = 0;
+        self.simple_add(Symbol::NewLine, 1);
     }
 }

@@ -95,7 +95,7 @@ pub struct Struct {
 }
 
 impl Parser {
-    fn parse_struct_declaration(&mut self) -> ParserOutput<String> {
+    pub fn parse_struct_declaration(&mut self) -> ParserOutput<String> {
         self.expect_token(Symbol::Struct)
             .and_then(|_| self.with_whitespace(|p| p.expect_identifier()))
             .and_then(|name| {
@@ -103,7 +103,7 @@ impl Parser {
             })
     }
 
-    fn parse_field(&mut self) -> ParserOutput<Field> {
+    pub fn parse_field(&mut self) -> ParserOutput<Field> {
         self.expect_identifier().and_then(|name| {
             self.with_whitespace(|p| p.expect_token(Symbol::Colon))
                 .and_then(|_| self.with_whitespace(|p| p.expect_identifier()))
@@ -111,37 +111,53 @@ impl Parser {
         })
     }
 
-    fn parse_metadata_entry(&mut self) -> ParserOutput<(String, Vec<String>)> {
-        self.expect_identifier().and_then(|key| {
-            self.with_whitespace(|p| p.expect_token(Symbol::Colon))
-                .and_then(|_| self.with_whitespace(|p| p.expect_token(Symbol::BracketOpen)))
-                .and_then(|_| self.parse_list(|p| p.expect_identifier()))
-                .and_then(|values| {
-                    self.expect_token(Symbol::BracketClose)
-                        .map(|_| (key, values))
-                })
-        })
+    fn parse_metadata_entry(&mut self, expected_symbol: Symbol) -> ParserOutput<Vec<String>> {
+        self.expect_token(expected_symbol)
+            .and_then(|_| self.with_whitespace(|p| p.expect_token(Symbol::Colon)))
+            .and_then(|_| self.with_whitespace(|p| p.expect_token(Symbol::BracketOpen)))
+            .and_then(|_| self.parse_list(|p| p.expect_identifier()))
+            .and_then(|values| self.expect_token(Symbol::BracketClose).map(|_| values))
     }
 
     fn parse_metadata(&mut self) -> ParserOutput<(Vec<String>, Vec<String>)> {
         self.expect_token(Symbol::Tag)
             .and_then(|_| self.expect_token(Symbol::Metadata))
             .and_then(|_| self.with_whitespace(|p| p.expect_token(Symbol::BraceOpen)))
-            .and_then(|_| self.parse_list(|p| p.with_whitespace(|p| p.parse_metadata_entry())))
-            .and_then(|entries| {
-                self.expect_token(Symbol::BraceClose).map(|_| {
-                    let mut properties = Vec::new();
-                    let mut traits = Vec::new();
-                    for (key, values) in entries {
-                        match key.as_str() {
-                            "Is" => properties.extend(values),
-                            "Derives" => traits.extend(values),
-                            _ => {} // Ignore unknown metadata keys
+            .and_then(|_| {
+                let mut properties = Vec::new();
+                let mut traits = Vec::new();
+                let mut diagnostics = Vec::new();
+
+                loop {
+                    self.skip_whitespace();
+                    match self.peek().symbol {
+                        Symbol::Properties => {
+                            let result = self.parse_metadata_entry(Symbol::Properties);
+                            properties.extend(result.output.unwrap_or_default());
+                            diagnostics.extend(result.diagnostics);
+                        }
+                        Symbol::Traits => {
+                            let result = self.parse_metadata_entry(Symbol::Traits);
+                            traits.extend(result.output.unwrap_or_default());
+                            diagnostics.extend(result.diagnostics);
+                        }
+                        Symbol::BraceClose => break,
+                        _ => {
+                            diagnostics.push(Diagnostic::new_error_simple(
+                                "Unexpected token in metadata",
+                                &self.peek().pos,
+                            ));
+                            self.consume(); // Skip the unexpected token
                         }
                     }
-                    (properties, traits)
-                })
+                }
+
+                ParserOutput {
+                    output: Some((properties, traits)),
+                    diagnostics,
+                }
             })
+            .and_then(|metadata| self.expect_token(Symbol::BraceClose).map(|_| metadata))
     }
 
     pub fn parse_struct(&mut self) -> ParserOutput<Struct> {
@@ -155,7 +171,10 @@ impl Parser {
                     traits,
                 })
             })
-            .and_then(|struct_| self.expect_token(Symbol::BraceClose).map(|_| struct_))
+            .and_then(|struct_| {
+                self.with_whitespace(|p| p.expect_token(Symbol::BraceClose))
+                    .map(|_| struct_)
+            })
     }
 }
 
@@ -164,10 +183,16 @@ impl Parser {
         Parser { offset: 0, tokens }
     }
 
+    /// Check the next token
+    ///
+    /// To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
     fn peek(&self) -> &Token {
         &self.tokens[self.offset]
     }
 
+    /// Return the next token and advance the cursor
+    ///
+    /// To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
     fn consume(&mut self) -> &Token {
         let token = &self.tokens[self.offset];
         self.offset += 1;
@@ -175,7 +200,9 @@ impl Parser {
     }
 
     fn skip_whitespace(&mut self) {
-        while matches!(self.peek().symbol, Symbol::Space | Symbol::NewLine) {
+        while matches!(self.peek().symbol, Symbol::Space | Symbol::NewLine)
+            && self.offset < self.tokens.len() - 1
+        {
             self.consume();
         }
     }
@@ -260,6 +287,7 @@ impl Parser {
             }
             if self.peek().symbol == Symbol::BraceClose
                 || self.peek().symbol == Symbol::BracketClose
+                || self.peek().symbol == Symbol::Tag
             {
                 break;
             }
