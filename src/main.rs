@@ -28,16 +28,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         maybe_text.unwrap()
     };
-    println!("input file is: \n{}", program_root);
+    // println!("input file is: \n{}", program_root);
     // Start timer
-    let now = Instant::now();
+    let t_start = Instant::now();
     // Lex
     let mut lexer = Lexer::new(file);
     lexer.lex(&program_root);
-    println!("time elapsed: {:?}", Instant::now() - now);
+    let t_lexing_done = Instant::now();
     // Parse the file
     let mut parser = Parser::new(lexer.token_stream);
     let out = parser.parse_all();
+    let t_parsing_done = Instant::now();
     // Display errors
     if out.output.is_none() {
         for diagnostic in out.diagnostics {
@@ -45,9 +46,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         return Err("could not compile due to parsing errors".into());
     }
-    println!("{:#?}", out.output);
-    // let ast = [out.output.unwrap()];
-    // fs::write("gen/test_case.c", codegen_c::write_all(file, ast.iter()))
-    //     .expect("Unable to write file");
+    let ast = out.output.unwrap();
+    let generated_code = codegen_c::write_all(file, ast.iter());
+    let t_codegen_done = Instant::now();
+    fs::write("gen/test_case.c", generated_code).expect("Unable to write file");
+    // Report on code timings
+    println!(
+        "compilation finished\n\ntime spent\nlexing: {:?}\nparsing: {:?}\ncodegen: {:?}",
+        t_lexing_done - t_start,
+        t_parsing_done - t_lexing_done,
+        t_codegen_done - t_parsing_done
+    );
     Ok(())
 }
