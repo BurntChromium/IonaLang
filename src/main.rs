@@ -14,6 +14,8 @@ use lexer::Lexer;
 use parser::Parser;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // Start timer
+    let t_start = Instant::now();
     // Capture command line
     let args: Vec<String> = env::args().collect();
     let file: &str = if args.len() == 1 {
@@ -29,8 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         maybe_text.unwrap()
     };
     // println!("input file is: \n{}", program_root);
-    // Start timer
-    let t_start = Instant::now();
+    let t_compile_start = Instant::now();
     // Lex
     let mut lexer = Lexer::new(file);
     lexer.lex(&program_root);
@@ -50,10 +51,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let generated_code = codegen_c::write_all(file, ast.iter());
     let t_codegen_done = Instant::now();
     fs::write("gen/test_case.c", generated_code).expect("Unable to write file");
+    let t_all = Instant::now();
     // Report on code timings
     println!(
-        "compilation finished\n\ntime spent\nlexing: {:?}\nparsing: {:?}\ncodegen: {:?}",
-        t_lexing_done - t_start,
+        "finished in {:?}\nsub-timings\n > lexing: {:?}\n > parsing: {:?}\n > codegen: {:?}",
+        t_all - t_start,
+        t_lexing_done - t_compile_start,
         t_parsing_done - t_lexing_done,
         t_codegen_done - t_parsing_done
     );
