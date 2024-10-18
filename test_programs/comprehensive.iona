@@ -1,0 +1,22 @@
+struct Animal {
+	legs: Int,
+	hair: Bool,
+	feathers: Bool
+	
+	@metadata {
+		Is: [Public]
+		Derives: [Eq, Show]
+	}
+}
+
+enum Pets {
+	Dog,
+	Fish,
+	Bird,
+	Cat: Int,
+	
+	@metadata {
+		Is: [Public]
+		Derives: [Eq, Show]
+	}
+}

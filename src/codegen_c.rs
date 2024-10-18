@@ -21,6 +21,7 @@ fn write_struct(input: &Struct) -> String {
             Type::Integer => buffer.push_str("\tint_fast64_t"),
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
+            Type::Void => panic!("A struct cannot have type Void. This error should have been caught earlier, but it appeared during code generation.") // this is not possible
         }
         buffer.push_str(&format!(" {};\n", field.name));
     }
@@ -32,9 +33,9 @@ fn write_struct(input: &Struct) -> String {
 /// Write an AST to a string
 ///
 /// TODO: expand AST beyond just `Struct`s
-pub fn write_all<'a, I>(filename: &str, ast: I) -> String
+pub fn write_all<'ast, I>(filename: &str, ast: I) -> String
 where
-    I: Iterator<Item = &'a Struct>,
+    I: Iterator<Item = &'ast Struct>,
 {
     let mut buffer = write_header(filename);
     for s in ast {

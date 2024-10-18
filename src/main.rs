@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("time elapsed: {:?}", Instant::now() - now);
     // Parse the file
     let mut parser = Parser::new(lexer.token_stream);
-    let out = parser.parse_struct();
+    let out = parser.parse_all();
     // Display errors
     if out.output.is_none() {
         for diagnostic in out.diagnostics {
@@ -45,8 +45,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         return Err("could not compile due to parsing errors".into());
     }
-    let ast = [out.output.unwrap()];
-    fs::write("gen/test_case.c", codegen_c::write_all(file, ast.iter()))
-        .expect("Unable to write file");
+    println!("{:#?}", out.output);
+    // let ast = [out.output.unwrap()];
+    // fs::write("gen/test_case.c", codegen_c::write_all(file, ast.iter()))
+    //     .expect("Unable to write file");
     Ok(())
 }

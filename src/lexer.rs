@@ -14,6 +14,7 @@ pub enum Symbol {
     Identifier(String),
     Integer(i64),
     Struct,
+    Enum,
     Colon,
     Comma,
     Tag,
@@ -142,6 +143,7 @@ impl Lexer {
                     let word_len = word.len();
                     match word.as_str() {
                         "struct" => self.simple_add(Symbol::Struct, word_len),
+                        "enum" => self.simple_add(Symbol::Enum, word_len),
                         "metadata" => self.simple_add(Symbol::Metadata, word_len),
                         "Is" => self.simple_add(Symbol::Properties, word_len),
                         "Derives" => self.simple_add(Symbol::Traits, word_len),
