@@ -21,7 +21,7 @@ fn write_struct(input: &Struct) -> String {
             Type::Integer => buffer.push_str("\tint_fast64_t"),
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
-            Type::Void => panic!("A struct cannot have type Void. This error should have been caught earlier, but it appeared during code generation.") // this is not possible
+            Type::Void => panic!("A struct cannot have type Void. This error indicates that there is a compiler issue, it should have been caught before code generation.") // this should not be possible
         }
         buffer.push_str(&format!(" {};\n", field.name));
     }
