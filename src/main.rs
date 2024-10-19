@@ -48,6 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("could not compile due to parsing errors".into());
     }
     let ast = out.output.unwrap();
+    println!("{:?}", ast);
     let generated_code = codegen_c::write_all(file, ast.iter());
     let t_codegen_done = Instant::now();
     fs::write("gen/test_case.c", generated_code).expect("Unable to write file");

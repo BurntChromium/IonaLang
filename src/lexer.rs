@@ -13,14 +13,17 @@ pub struct SourcePosition {
 pub enum Symbol {
     Identifier(String),
     Integer(i64),
+    Import,
     Struct,
     Enum,
+    With,
     Colon,
     Comma,
     Tag,
     Metadata,
     Properties,
     Traits,
+    Semicolon,
     BraceOpen,
     BraceClose,
     BracketOpen,
@@ -96,6 +99,10 @@ impl Lexer {
                     self.simple_add(Symbol::Space, c.len_utf8());
                     chars.next();
                 }
+                ';' => {
+                    self.simple_add(Symbol::Semicolon, 1);
+                    chars.next();
+                }
                 '{' => {
                     self.simple_add(Symbol::BraceOpen, 1);
                     chars.next();
@@ -142,8 +149,10 @@ impl Lexer {
                     }
                     let word_len = word.len();
                     match word.as_str() {
+                        "import" => self.simple_add(Symbol::Import, word_len),
                         "struct" => self.simple_add(Symbol::Struct, word_len),
                         "enum" => self.simple_add(Symbol::Enum, word_len),
+                        "with" => self.simple_add(Symbol::With, word_len),
                         "metadata" => self.simple_add(Symbol::Metadata, word_len),
                         "Is" => self.simple_add(Symbol::Properties, word_len),
                         "Derives" => self.simple_add(Symbol::Traits, word_len),

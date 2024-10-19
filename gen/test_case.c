@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "math"
+
 struct Animal {
 	int_fast64_t legs;
 	bool hair;

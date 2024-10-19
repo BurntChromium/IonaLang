@@ -2,7 +2,7 @@
 
 use crate::parser::*;
 
-/// Handles imports
+/// Handles import for core libraries
 ///
 /// TODO: actually dynamically handle imports...
 fn write_header(filename: &str) -> String {
@@ -10,6 +10,13 @@ fn write_header(filename: &str) -> String {
         "// source: {}\n\n#include <stdbool.h>\n#include <stdint.h>\n\n",
         filename
     )
+}
+
+/// Handles user defined imports
+///
+/// C doesn't have a notion of qualified imports so this is really simple (qualification is handled by the compiler)
+fn write_import(input: &Import) -> String {
+    format!("#include \"{}\"", input.file)
 }
 
 /// Write a Struct to a C struct
@@ -74,6 +81,10 @@ where
             }
             ASTNode::StructDeclaration(s) => {
                 buffer.push_str(&write_struct(s));
+                buffer.push_str("\n\n");
+            }
+            ASTNode::ImportStatement(i) => {
+                buffer.push_str(&write_import(i));
                 buffer.push_str("\n\n");
             }
         }

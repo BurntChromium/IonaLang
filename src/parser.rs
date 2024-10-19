@@ -143,12 +143,40 @@ pub struct Enum {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    pub file: String,
+    pub items: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ASTNode {
     StructDeclaration(Struct),
     EnumDeclaration(Enum),
+    ImportStatement(Import),
 }
 
 // -------------------- Parsers --------------------
+
+// -------------------| Parsers for Import |--------------------
+
+impl Parser {
+    fn parse_import(&mut self) -> ParserOutput<Import> {
+        self.then_ignore(Symbol::Import)
+            .and_then(|_| self.with_whitespace(|p| p.then_identifier()))
+            .and_then(|file| {
+                self.with_whitespace(|p| p.then_ignore(Symbol::With))
+                    .and_then(|_| {
+                        self.parse_list_comma_separated(|p| {
+                            p.with_whitespace(|p| p.then_identifier())
+                        })
+                    })
+                    .and_then(|items| {
+                        self.then_ignore(Symbol::Semicolon)
+                            .map(|_| Import { file, items })
+                    })
+            })
+    }
+}
 
 // -------------------| Parsers for Struct + Enum |--------------------
 
@@ -372,9 +400,10 @@ impl Parser {
         match self.peek().symbol {
             Symbol::Struct => self.parse_struct().map(ASTNode::StructDeclaration),
             Symbol::Enum => self.parse_enum().map(ASTNode::EnumDeclaration),
+            Symbol::Import => self.parse_import().map(ASTNode::ImportStatement),
             _ => {
                 let message = format!(
-                    "expected 'struct' or 'enum', but found {:?}",
+                    "expected a keyword such as 'fn', 'struct', or 'import', but found {:?}",
                     self.peek().symbol
                 );
                 self.single_error(&message)
@@ -497,6 +526,7 @@ impl Parser {
             if self.peek().symbol == Symbol::BraceClose
                 || self.peek().symbol == Symbol::BracketClose
                 || self.peek().symbol == Symbol::Tag
+                || self.peek().symbol == Symbol::Semicolon
             {
                 break;
             }
