@@ -1,18 +1,11 @@
-// source: ./test_programs/comprehensive.iona
+// source: ./stdlib/core.iona
 
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "math"
-
-struct Animal {
-	int_fast64_t legs;
-	bool hair;
-	bool feathers;
-};
-
 typedef enum {
 	SOME,
+	NONE,
 } MaybeStates;
 
 typedef union {
@@ -25,18 +18,17 @@ struct Maybe {
 };
 
 typedef enum {
-	DOG,
-	FISH,
-	BIRD,
-	CAT,
-} PetsStates;
+	OKAY,
+	ERROR,
+} ResultStates;
 
 typedef union {
-	int_fast64_t Cat;
-} PetsValues;
+	void* Okay;
+	void* Error;
+} ResultValues;
 
-struct Pets {
-	PetsStates tag;
-	PetsValues data;
+struct Result {
+	ResultStates tag;
+	ResultValues data;
 };
 

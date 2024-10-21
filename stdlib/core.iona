@@ -3,7 +3,7 @@
 # `Maybe` represents a possibly missing value
 enum Maybe {
     Some: Generic<T>,
-    None
+    None,
 
     @metadata {
         Is: [Export]
@@ -14,7 +14,7 @@ enum Maybe {
 # `Result` represents either success or failure
 enum Result {
     Okay: Generic<O>,
-    Error: Generic<E>
+    Error: Generic<E>,
 
     @metadata {
         Is: [Export],

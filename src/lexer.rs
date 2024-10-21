@@ -87,6 +87,16 @@ impl Lexer {
         let mut chars = code.chars().peekable();
         while let Some(&c) = chars.peek() {
             match c {
+                // Consume comments until a line break
+                '#' => {
+                    while let Some(&ch) = chars.peek() {
+                        if ch != '\n' {
+                            chars.next(); // consume the character
+                        } else {
+                            break; // Stop at the end of the line
+                        }
+                    }
+                }
                 '\n' => {
                     self.simple_add(Symbol::NewLine, 1);
                     chars.next();
