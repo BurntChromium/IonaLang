@@ -20,6 +20,8 @@ fn write_import(input: &Import) -> String {
 }
 
 /// Write a Struct to a C struct
+///
+/// TODO! Replace generic's use of void pointer with Monomorphization (need a table to track this from call sites)
 fn write_struct(input: &Struct) -> String {
     let mut buffer: String = format!("struct {} {{\n", input.name);
     for field in input.fields.iter() {
@@ -28,6 +30,7 @@ fn write_struct(input: &Struct) -> String {
             Type::Integer => buffer.push_str("\tint_fast64_t"),
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
+            Type::Generic(_) => buffer.push_str("\tvoid*"),
             Type::Void => panic!("A struct cannot have type Void. This error indicates that there is a compiler issue, it should have been caught before code generation.") // this should not be possible
         }
         buffer.push_str(&format!(" {};\n", field.name));
@@ -38,6 +41,8 @@ fn write_struct(input: &Struct) -> String {
 }
 
 /// Write an enum to C as a tagged union
+///
+/// TODO! Replace generic's use of void pointer with Monomorphization (need a table to track this from call sites)
 fn write_enum(input: &Enum) -> String {
     // Create the enum for states
     let mut buffer: String = "typedef enum {\n".to_string();
@@ -54,6 +59,7 @@ fn write_enum(input: &Enum) -> String {
             Type::String => buffer.push_str("\tchar"),
             Type::Integer => buffer.push_str("\tint_fast64_t"),
             Type::Boolean => buffer.push_str("\tbool"),
+            Type::Generic(_) => buffer.push_str("\tvoid*"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
         }
         buffer.push_str(&format!(" {};\n", field.name));

@@ -12,6 +12,19 @@ struct Animal {
 };
 
 typedef enum {
+	SOME,
+} MaybeStates;
+
+typedef union {
+	void* Some;
+} MaybeValues;
+
+struct Maybe {
+	MaybeStates tag;
+	MaybeValues data;
+};
+
+typedef enum {
 	DOG,
 	FISH,
 	BIRD,

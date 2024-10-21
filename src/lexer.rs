@@ -16,6 +16,7 @@ pub enum Symbol {
     Import,
     Struct,
     Enum,
+    Generic,
     With,
     Colon,
     Comma,
@@ -24,10 +25,12 @@ pub enum Symbol {
     Properties,
     Traits,
     Semicolon,
-    BraceOpen,
-    BraceClose,
-    BracketOpen,
-    BracketClose,
+    BraceOpen,    // {
+    BraceClose,   // }
+    BracketOpen,  // [
+    BracketClose, // ]
+    AngleOpen,    // <
+    AngleClose,   // >
     Space,
     NewLine,
 }
@@ -119,6 +122,14 @@ impl Lexer {
                     self.simple_add(Symbol::BracketClose, 1);
                     chars.next();
                 }
+                '<' => {
+                    self.simple_add(Symbol::AngleOpen, 1);
+                    chars.next();
+                }
+                '>' => {
+                    self.simple_add(Symbol::AngleClose, 1);
+                    chars.next();
+                }
                 ':' => {
                     self.simple_add(Symbol::Colon, 1);
                     chars.next();
@@ -156,6 +167,7 @@ impl Lexer {
                         "metadata" => self.simple_add(Symbol::Metadata, word_len),
                         "Is" => self.simple_add(Symbol::Properties, word_len),
                         "Derives" => self.simple_add(Symbol::Traits, word_len),
+                        "Generic" => self.simple_add(Symbol::Generic, word_len),
                         _ => self.simple_add(Symbol::Identifier(word), word_len),
                     }
                 }

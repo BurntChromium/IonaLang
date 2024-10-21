@@ -102,6 +102,7 @@ pub enum Type {
     Integer,
     String,
     Boolean,
+    Generic(String),
     Custom(String),
 }
 
@@ -157,7 +158,31 @@ pub enum ASTNode {
 
 // -------------------- Parsers --------------------
 
-// -------------------| Parsers for Import |--------------------
+// -------------------| Parse Types |--------------------
+
+impl Parser {
+    fn parse_type(&mut self) -> ParserOutput<Type> {
+        // Handle generics
+        if self.peek().symbol == Symbol::Generic {
+            self.then_ignore(Symbol::Generic);
+            self.then_ignore(Symbol::AngleOpen);
+            let generic = self
+                .then_identifier()
+                .and_then(|name| ParserOutput::okay(Type::Generic(name)));
+            self.then_ignore(Symbol::AngleClose);
+            return generic;
+        }
+        self.then_identifier().and_then(|name| match name.as_str() {
+            "Int" => ParserOutput::okay(Type::Integer),
+            "Str" => ParserOutput::okay(Type::String),
+            "Bool" => ParserOutput::okay(Type::Boolean),
+
+            _ => ParserOutput::okay(Type::Custom(name)),
+        })
+    }
+}
+
+// -------------------| Parser Imports |--------------------
 
 impl Parser {
     fn parse_import(&mut self) -> ParserOutput<Import> {
@@ -178,18 +203,9 @@ impl Parser {
     }
 }
 
-// -------------------| Parsers for Struct + Enum |--------------------
+// -------------------| Shared Parsers: Structs and Enums |--------------------
 
 impl Parser {
-    fn parse_type(&mut self) -> ParserOutput<Type> {
-        self.then_identifier().and_then(|name| match name.as_str() {
-            "Int" => ParserOutput::okay(Type::Integer),
-            "Str" => ParserOutput::okay(Type::String),
-            "Bool" => ParserOutput::okay(Type::Boolean),
-            _ => ParserOutput::okay(Type::Custom(name)),
-        })
-    }
-
     fn parse_data_properties(&mut self) -> ParserOutput<DataProperties> {
         self.then_identifier().and_then(|name| match name.as_str() {
             "Public" => ParserOutput::okay(DataProperties::Public),
@@ -276,7 +292,7 @@ impl Parser {
     }
 }
 
-// -------------------| Parsers for Struct |--------------------
+// -------------------| Struct Parsers |--------------------
 
 impl Parser {
     fn parse_struct_declaration(&mut self) -> ParserOutput<String> {
@@ -323,7 +339,7 @@ impl Parser {
     }
 }
 
-// -------------------| Parsers for Enum |--------------------
+// -------------------| Enum Parsers |--------------------
 
 impl Parser {
     fn parse_enum_declaration(&mut self) -> ParserOutput<String> {

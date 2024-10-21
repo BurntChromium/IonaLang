@@ -1,0 +1,23 @@
+# Core functions and data types for Iona
+
+# `Maybe` represents a possibly missing value
+enum Maybe {
+    Some: Generic<T>,
+    None
+
+    @metadata {
+        Is: [Export]
+        Derives: [Eq, Show]
+    }
+}
+
+# `Result` represents either success or failure
+enum Result {
+    Okay: Generic<O>,
+    Error: Generic<E>
+
+    @metadata {
+        Is: [Export],
+        Derives: [Eq, Show]
+    }
+}
