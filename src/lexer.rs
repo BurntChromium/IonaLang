@@ -216,30 +216,24 @@ impl Lexer {
                     }
                 }
                 c if c.is_numeric() => {
-                    // Capture digits for the integer part
-                    let mut number: String =
-                        chars.by_ref().take_while(|&ch| ch.is_numeric()).collect();
-
-                    // Check if the next character is a decimal point (.)
-                    if let Some('.') = chars.clone().next() {
-                        // Consume the decimal point
-                        number.push(chars.next().unwrap());
-
-                        // Capture the digits after the decimal point
-                        number.extend(chars.by_ref().take_while(|&ch| ch.is_numeric()));
-
-                        // Try parsing as a float (e.g., 12.34)
-                        if let Ok(f) = number.parse::<f64>() {
+                    let mut number: String = chars
+                        .by_ref()
+                        .take_while(|&ch| ch.is_numeric() || ch == '.') // Allow decimal point in take_while
+                        .collect();
+                    if number.contains('.') {
+                        let tail: String =
+                            chars.by_ref().take_while(|&ch| ch.is_numeric()).collect();
+                        number.push_str(&tail);
+                        if let Ok(f) = number.parse() {
                             self.simple_add(Symbol::Float(f), number.len());
                         } else {
-                            // Handle parsing error for float
+                            // Handle error
                         }
                     } else {
-                        // Try parsing as an integer if no decimal point (e.g., 123)
-                        if let Ok(n) = number.parse::<i64>() {
+                        if let Ok(n) = number.parse() {
                             self.simple_add(Symbol::Integer(n), number.len());
                         } else {
-                            // Handle parsing error for integer
+                            // Handle error
                         }
                     }
                 }

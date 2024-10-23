@@ -293,3 +293,24 @@ impl Parser {
         }
     }
 }
+
+// -------------------- Unit Tests --------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+
+    #[test]
+    fn test_expr_1() {
+        let program_text = "5";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_expr(0);
+        let expected = Expr::IntegerLiteral(5);
+        assert_eq!(expected, out.output.unwrap());
+    }
+}
