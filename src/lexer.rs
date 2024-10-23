@@ -16,11 +16,12 @@ pub enum Symbol {
     Import,
     Struct,
     Enum,
+    Function,
     Generic,
     With,
     Colon,
     Comma,
-    Tag,
+    Tag, // @
     Metadata,
     Properties,
     Traits,
@@ -29,8 +30,11 @@ pub enum Symbol {
     BraceClose,   // }
     BracketOpen,  // [
     BracketClose, // ]
-    AngleOpen,    // <
-    AngleClose,   // >
+    LeftAngle,    // <
+    RightAngle,   // >
+    ParenOpen,    // (
+    ParenClose,   // )
+    Dash,         // -
     Space,
     NewLine,
 }
@@ -133,11 +137,23 @@ impl Lexer {
                     chars.next();
                 }
                 '<' => {
-                    self.simple_add(Symbol::AngleOpen, 1);
+                    self.simple_add(Symbol::LeftAngle, 1);
                     chars.next();
                 }
                 '>' => {
-                    self.simple_add(Symbol::AngleClose, 1);
+                    self.simple_add(Symbol::RightAngle, 1);
+                    chars.next();
+                }
+                '(' => {
+                    self.simple_add(Symbol::ParenOpen, 1);
+                    chars.next();
+                }
+                ')' => {
+                    self.simple_add(Symbol::ParenClose, 1);
+                    chars.next();
+                }
+                '-' => {
+                    self.simple_add(Symbol::Dash, 1);
                     chars.next();
                 }
                 ':' => {
@@ -173,6 +189,7 @@ impl Lexer {
                         "import" => self.simple_add(Symbol::Import, word_len),
                         "struct" => self.simple_add(Symbol::Struct, word_len),
                         "enum" => self.simple_add(Symbol::Enum, word_len),
+                        "fn" => self.simple_add(Symbol::Function, word_len),
                         "with" => self.simple_add(Symbol::With, word_len),
                         "metadata" => self.simple_add(Symbol::Metadata, word_len),
                         "Is" => self.simple_add(Symbol::Properties, word_len),

@@ -149,6 +149,35 @@ pub struct Import {
     pub items: Vec<String>,
 }
 
+/// Functions can have different properties than Data Types
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionProperties {
+    Public,
+    Export,
+}
+
+/// Functions have a permissions/effects system
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionPermissions {
+    ReadFile,
+    WriteFile,
+    ReadIO,
+    WriteIO,
+    HTTPAny,
+    HTTPGet,
+    HTTPPost,
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Function {
+    pub name: String,
+    pub args: Vec<Field>,
+    pub returns: Type,
+    pub properties: Vec<FunctionProperties>,
+    pub permissions: Vec<FunctionPermissions>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ASTNode {
     StructDeclaration(Struct),
@@ -165,13 +194,14 @@ impl Parser {
         // Handle generics
         if self.peek().symbol == Symbol::Generic {
             self.then_ignore(Symbol::Generic);
-            self.then_ignore(Symbol::AngleOpen);
+            self.then_ignore(Symbol::LeftAngle);
             let generic = self
                 .then_identifier()
                 .and_then(|name| ParserOutput::okay(Type::Generic(name)));
-            self.then_ignore(Symbol::AngleClose);
+            self.then_ignore(Symbol::RightAngle);
             return generic;
         }
+        // Handle everything else
         self.then_identifier().and_then(|name| match name.as_str() {
             "Int" => ParserOutput::okay(Type::Integer),
             "Str" => ParserOutput::okay(Type::String),
@@ -303,7 +333,7 @@ impl Parser {
             })
     }
 
-    fn parse_struct_field(&mut self) -> ParserOutput<Field> {
+    fn parse_field_mandatory_type(&mut self) -> ParserOutput<Field> {
         self.then_identifier().and_then(|name| {
             self.with_whitespace(|p| p.then_ignore(Symbol::Colon))
                 .and_then(|_| self.with_whitespace(|p| p.parse_type()))
@@ -321,7 +351,9 @@ impl Parser {
         }
         let struct_name = name.output.clone().unwrap();
         name.and_then(|_| {
-            self.parse_list_comma_separated(|p| p.with_whitespace(|p| p.parse_struct_field()))
+            self.parse_list_comma_separated(|p| {
+                p.with_whitespace(|p| p.parse_field_mandatory_type())
+            })
         })
         .and_then(|fields| {
             let metadata = self.parse_metadata();
@@ -350,7 +382,7 @@ impl Parser {
             })
     }
 
-    fn parse_enum_field(&mut self) -> ParserOutput<Field> {
+    fn parse_field_optional_type(&mut self) -> ParserOutput<Field> {
         self.then_identifier().and_then(|name| {
             self.with_whitespace(|p| {
                 match p.peek().symbol {
@@ -386,7 +418,9 @@ impl Parser {
         }
         let enum_name = name.output.clone().unwrap();
         name.and_then(|_| {
-            self.parse_list_comma_separated(|p| p.with_whitespace(|p| p.parse_enum_field()))
+            self.parse_list_comma_separated(|p| {
+                p.with_whitespace(|p| p.parse_field_optional_type())
+            })
         })
         .and_then(|fields| {
             let metadata = self.parse_metadata();
@@ -425,6 +459,50 @@ impl Parser {
                 self.single_error(&message)
             }
         }
+    }
+}
+
+// -------------------| Parse Functions |--------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionDeclaration {
+    pub name: String,
+    pub parameters: Vec<Field>,
+    pub return_type: Type,
+}
+
+impl Parser {
+    /// Returns (Name, Args, ReturnType)
+    fn parse_function_declaration(&mut self) -> ParserOutput<FunctionDeclaration> {
+        // Parse "fn" keyword and function name
+        let fn_and_name = self
+            .then_ignore(Symbol::Function)
+            .and_then(|_| self.with_whitespace(|p| p.then_identifier()));
+
+        // Parse parameters and return type
+        let declaration = fn_and_name.and_then(|name| {
+            self.then_ignore(Symbol::ParenOpen)
+                .and_then(|_| self.parse_list_comma_separated(|p| p.parse_field_mandatory_type()))
+                .and_then(|parameters| {
+                    self.then_ignore(Symbol::ParenClose).and_then(|_| {
+                        // Parse return type arrow and type
+                        self.with_whitespace(|p| p.then_ignore(Symbol::Dash))
+                            .and_then(|_| self.then_ignore(Symbol::RightAngle))
+                            .and_then(|_| self.with_whitespace(|p| p.parse_type()))
+                            .map(|return_type| (name, parameters, return_type))
+                    })
+                })
+        });
+
+        // Parse opening brace and construct final result
+        declaration.and_then(|(name, parameters, return_type)| {
+            self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen))
+                .map(|_| FunctionDeclaration {
+                    name,
+                    parameters,
+                    return_type,
+                })
+        })
     }
 }
 
@@ -539,10 +617,12 @@ impl Parser {
                     break;
                 }
             }
+            // Symbols that denote the end of the list
             if self.peek().symbol == Symbol::BraceClose
                 || self.peek().symbol == Symbol::BracketClose
                 || self.peek().symbol == Symbol::Tag
                 || self.peek().symbol == Symbol::Semicolon
+                || self.peek().symbol == Symbol::ParenClose
             {
                 break;
             }
@@ -597,5 +677,40 @@ impl Parser {
             output: Some(items),
             diagnostics,
         }
+    }
+}
+
+// -------------------- Unit Tests --------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+
+    #[test]
+    fn test_parse_fn_declaration() {
+        let program_text = "fn foo(a: Int, b: Int) -> Int {";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_function_declaration();
+        let expected = FunctionDeclaration {
+            name: "foo".to_string(),
+            parameters: vec![
+                Field {
+                    name: "a".to_string(),
+                    field_type: Type::Integer,
+                },
+                Field {
+                    name: "b".to_string(),
+                    field_type: Type::Integer,
+                },
+            ],
+            return_type: Type::Integer,
+        };
+        assert!(out.output.is_some());
+        assert_eq!(out.output.unwrap(), expected);
     }
 }
