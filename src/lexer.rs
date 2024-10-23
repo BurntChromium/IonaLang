@@ -25,6 +25,7 @@ pub enum Symbol {
     Metadata,
     Properties,
     Traits,
+    Permissions,
     Semicolon,
     BraceOpen,    // {
     BraceClose,   // }
@@ -194,6 +195,7 @@ impl Lexer {
                         "metadata" => self.simple_add(Symbol::Metadata, word_len),
                         "Is" => self.simple_add(Symbol::Properties, word_len),
                         "Derives" => self.simple_add(Symbol::Traits, word_len),
+                        "Uses" => self.simple_add(Symbol::Permissions, word_len),
                         "Generic" => self.simple_add(Symbol::Generic, word_len),
                         _ => self.simple_add(Symbol::Identifier(word), word_len),
                     }

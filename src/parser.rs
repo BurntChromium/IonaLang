@@ -258,29 +258,24 @@ impl Parser {
         })
     }
 
-    fn parse_metadata_data_properties(
+    fn parse_metadata_list<T, F>(
         &mut self,
         expected_symbol: Symbol,
-    ) -> ParserOutput<Vec<DataProperties>> {
+        parse_item: F,
+    ) -> ParserOutput<Vec<T>>
+    where
+        F: Fn(&mut Self) -> ParserOutput<T>,
+    {
         self.then_ignore(expected_symbol)
             .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::Colon)))
             .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BracketOpen)))
-            .and_then(|_| self.parse_list_comma_separated(|p| p.parse_data_properties()))
+            .and_then(|_| self.parse_list_comma_separated(|p| parse_item(p)))
             .and_then(|values| self.then_ignore(Symbol::BracketClose).map(|_| values))
     }
 
-    fn parse_metadata_data_traits(
+    fn parse_metadata_data_types(
         &mut self,
-        expected_symbol: Symbol,
-    ) -> ParserOutput<Vec<DataTraits>> {
-        self.then_ignore(expected_symbol)
-            .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::Colon)))
-            .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BracketOpen)))
-            .and_then(|_| self.parse_list_comma_separated(|p| p.parse_data_traits()))
-            .and_then(|values| self.then_ignore(Symbol::BracketClose).map(|_| values))
-    }
-
-    fn parse_metadata(&mut self) -> ParserOutput<(Vec<DataProperties>, Vec<DataTraits>)> {
+    ) -> ParserOutput<(Vec<DataProperties>, Vec<DataTraits>)> {
         self.then_ignore(Symbol::Tag)
             .and_then(|_| self.then_ignore(Symbol::Metadata))
             .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen)))
@@ -293,12 +288,15 @@ impl Parser {
                     self.skip_whitespace();
                     match self.peek().symbol {
                         Symbol::Properties => {
-                            let result = self.parse_metadata_data_properties(Symbol::Properties);
+                            let result = self.parse_metadata_list(Symbol::Properties, |p| {
+                                p.parse_data_properties()
+                            });
                             properties.extend(result.output.unwrap_or_default());
                             diagnostics.extend(result.diagnostics);
                         }
                         Symbol::Traits => {
-                            let result = self.parse_metadata_data_traits(Symbol::Traits);
+                            let result =
+                                self.parse_metadata_list(Symbol::Traits, |p| p.parse_data_traits());
                             traits.extend(result.output.unwrap_or_default());
                             diagnostics.extend(result.diagnostics);
                         }
@@ -356,7 +354,7 @@ impl Parser {
             })
         })
         .and_then(|fields| {
-            let metadata = self.parse_metadata();
+            let metadata = self.parse_metadata_data_types();
             metadata.map(|(properties, traits)| Struct {
                 name: struct_name,
                 fields,
@@ -423,7 +421,7 @@ impl Parser {
             })
         })
         .and_then(|fields| {
-            let metadata = self.parse_metadata();
+            let metadata = self.parse_metadata_data_types();
             metadata.map(|(properties, traits)| Enum {
                 name: enum_name,
                 fields,
@@ -503,6 +501,77 @@ impl Parser {
                     return_type,
                 })
         })
+    }
+
+    fn parse_fn_properties(&mut self) -> ParserOutput<FunctionProperties> {
+        self.then_identifier().and_then(|name| match name.as_str() {
+            "Public" => ParserOutput::okay(FunctionProperties::Public),
+            "Export" => ParserOutput::okay(FunctionProperties::Export),
+            other => self.single_error::<FunctionProperties>(&format!(
+                "expected 'Public' or 'Export', but received {}",
+                other
+            )),
+        })
+    }
+
+    fn parse_fn_permissions(&mut self) -> ParserOutput<FunctionPermissions> {
+        self.then_identifier().and_then(|name| match name.as_str() {
+            "ReadFile" => ParserOutput::okay(FunctionPermissions::ReadFile),
+            "WriteFile" => ParserOutput::okay(FunctionPermissions::WriteFile),
+            "ReadIO" => ParserOutput::okay(FunctionPermissions::ReadIO),
+            "WriteIO" => ParserOutput::okay(FunctionPermissions::WriteIO),
+            "HTTPAny" => ParserOutput::okay(FunctionPermissions::HTTPAny),
+            "HTTPGet" => ParserOutput::okay(FunctionPermissions::HTTPGet),
+            "HTTPPost" => ParserOutput::okay(FunctionPermissions::HTTPPost),
+            other => ParserOutput::okay(FunctionPermissions::Custom(other.to_string())),
+        })
+    }
+
+    fn parse_metadata_functions(
+        &mut self,
+    ) -> ParserOutput<(Vec<FunctionProperties>, Vec<FunctionPermissions>)> {
+        self.then_ignore(Symbol::Tag)
+            .and_then(|_| self.then_ignore(Symbol::Metadata))
+            .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen)))
+            .and_then(|_| {
+                let mut properties = Vec::new();
+                let mut traits = Vec::new();
+                let mut diagnostics = Vec::new();
+
+                loop {
+                    self.skip_whitespace();
+                    match self.peek().symbol {
+                        Symbol::Properties => {
+                            let result = self.parse_metadata_list(Symbol::Properties, |p| {
+                                p.parse_fn_properties()
+                            });
+                            properties.extend(result.output.unwrap_or_default());
+                            diagnostics.extend(result.diagnostics);
+                        }
+                        Symbol::Traits => {
+                            let result = self.parse_metadata_list(Symbol::Permissions, |p| {
+                                p.parse_fn_permissions()
+                            });
+                            traits.extend(result.output.unwrap_or_default());
+                            diagnostics.extend(result.diagnostics);
+                        }
+                        Symbol::BraceClose => break,
+                        _ => {
+                            diagnostics.push(Diagnostic::new_error_simple(
+                                "Unexpected token in metadata",
+                                &self.peek().pos,
+                            ));
+                            self.consume(); // Skip the unexpected token
+                        }
+                    }
+                }
+
+                ParserOutput {
+                    output: Some((properties, traits)),
+                    diagnostics,
+                }
+            })
+            .and_then(|metadata| self.then_ignore(Symbol::BraceClose).map(|_| metadata))
     }
 }
 
