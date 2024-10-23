@@ -2,6 +2,7 @@
 
 mod codegen_c;
 mod diagnostics;
+mod expression_parser;
 mod lexer;
 mod parser;
 mod pipeline;

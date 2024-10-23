@@ -9,10 +9,11 @@ pub struct SourcePosition {
     pub column: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Symbol {
     Identifier(String),
     Integer(i64),
+    Float(f64),
     Import,
     Struct,
     Enum,
@@ -36,11 +37,21 @@ pub enum Symbol {
     ParenOpen,    // (
     ParenClose,   // )
     Dash,         // -
+    Dot,          // .
+    Or,
+    And,
+    LessThan,
+    GreaterThan,
+    Plus,
+    Minus,
+    Times,
+    Divide,
+    Modulo,
     Space,
     NewLine,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub symbol: Symbol,
     pub pos: SourcePosition,
@@ -157,6 +168,10 @@ impl Lexer {
                     self.simple_add(Symbol::Dash, 1);
                     chars.next();
                 }
+                '.' => {
+                    self.simple_add(Symbol::Dot, 1);
+                    chars.next();
+                }
                 ':' => {
                     self.simple_add(Symbol::Colon, 1);
                     chars.next();
@@ -201,11 +216,31 @@ impl Lexer {
                     }
                 }
                 c if c.is_numeric() => {
-                    let number: String = chars.by_ref().take_while(|&ch| ch.is_numeric()).collect();
-                    if let Ok(n) = number.parse() {
-                        self.simple_add(Symbol::Integer(n), number.len());
+                    // Capture digits for the integer part
+                    let mut number: String =
+                        chars.by_ref().take_while(|&ch| ch.is_numeric()).collect();
+
+                    // Check if the next character is a decimal point (.)
+                    if let Some('.') = chars.clone().next() {
+                        // Consume the decimal point
+                        number.push(chars.next().unwrap());
+
+                        // Capture the digits after the decimal point
+                        number.extend(chars.by_ref().take_while(|&ch| ch.is_numeric()));
+
+                        // Try parsing as a float (e.g., 12.34)
+                        if let Ok(f) = number.parse::<f64>() {
+                            self.simple_add(Symbol::Float(f), number.len());
+                        } else {
+                            // Handle parsing error for float
+                        }
                     } else {
-                        // Handle error
+                        // Try parsing as an integer if no decimal point (e.g., 123)
+                        if let Ok(n) = number.parse::<i64>() {
+                            self.simple_add(Symbol::Integer(n), number.len());
+                        } else {
+                            // Handle parsing error for integer
+                        }
                     }
                 }
                 _ => {
@@ -218,5 +253,29 @@ impl Lexer {
         self.position.line += 1;
         self.position.column = 0;
         self.simple_add(Symbol::NewLine, 1);
+    }
+}
+
+// -------------------- Unit Tests --------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+
+    #[test]
+    fn lex_int() {
+        let input_int = "64";
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&input_int);
+        assert_eq!(lexer.token_stream[0].symbol, Symbol::Integer(64));
+    }
+
+    #[test]
+    fn lex_float() {
+        let input_int = "3947.2884";
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&input_int);
+        assert_eq!(lexer.token_stream[0].symbol, Symbol::Float(3947.2884));
     }
 }

@@ -4,7 +4,7 @@ use crate::lexer::{Symbol, Token};
 
 // -------------------- Parser Object --------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Parser {
     tokens: Vec<Token>,
     offset: usize,
@@ -18,14 +18,14 @@ pub struct ParserOutput<T> {
 }
 
 impl<T> ParserOutput<T> {
-    fn okay(output: T) -> Self {
+    pub fn okay(output: T) -> Self {
         ParserOutput {
             output: Some(output),
             diagnostics: vec![],
         }
     }
 
-    fn err(diagnostics: Vec<Diagnostic>) -> Self {
+    pub fn err(diagnostics: Vec<Diagnostic>) -> Self {
         ParserOutput {
             output: None,
             diagnostics,
@@ -35,7 +35,7 @@ impl<T> ParserOutput<T> {
     /// Errors can be safely cast from one type to another because only the output varies
     ///
     /// This lets return a parser error from an "inner" parser error that returns type T from an outer parser that returns type O
-    fn transmute_error<O>(self) -> ParserOutput<O> {
+    pub fn transmute_error<O>(self) -> ParserOutput<O> {
         ParserOutput {
             output: None,
             diagnostics: self.diagnostics,
@@ -43,7 +43,7 @@ impl<T> ParserOutput<T> {
     }
 }
 
-trait ParserOutputExt<T> {
+pub trait ParserOutputExt<T> {
     fn and_then<U, F>(self, f: F) -> ParserOutput<U>
     where
         F: FnOnce(T) -> ParserOutput<U>;
@@ -585,21 +585,21 @@ impl Parser {
     /// Check the next token
     ///
     /// To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
-    fn peek(&self) -> &Token {
+    pub fn peek(&self) -> &Token {
         &self.tokens[self.offset]
     }
 
     /// Return the next token and advance the cursor
     ///
     /// To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
-    fn consume(&mut self) -> &Token {
+    pub fn consume(&mut self) -> &Token {
         let token = &self.tokens[self.offset];
         self.offset += 1;
         token
     }
 
     /// Helper method to create a single error from a given message
-    fn single_error<T>(&self, message: &str) -> ParserOutput<T> {
+    pub fn single_error<T>(&self, message: &str) -> ParserOutput<T> {
         ParserOutput::err(vec![Diagnostic::new_error_simple(
             message,
             &self.peek().pos,
@@ -615,7 +615,7 @@ impl Parser {
         }
     }
 
-    fn then_ignore(&mut self, expected: Symbol) -> ParserOutput<()> {
+    pub fn then_ignore(&mut self, expected: Symbol) -> ParserOutput<()> {
         if self.peek().symbol == expected {
             self.consume();
             ParserOutput::okay(())
@@ -661,7 +661,7 @@ impl Parser {
     }
 
     /// This parses a list of comma separated items. It doesn't handle EOF.
-    fn parse_list_comma_separated<T, F>(&mut self, parse_item: F) -> ParserOutput<Vec<T>>
+    pub fn parse_list_comma_separated<T, F>(&mut self, parse_item: F) -> ParserOutput<Vec<T>>
     where
         F: Fn(&mut Self) -> ParserOutput<T>,
     {
