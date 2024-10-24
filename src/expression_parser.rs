@@ -96,6 +96,11 @@ const fn precedence(op: &Symbol) -> u8 {
 
 impl Parser {
     fn parse_expr(&mut self, min_precedence: u8) -> ParserOutput<Expr> {
+        // Track our recursion depth
+        self.recursion_counter += 1;
+        if self.recursion_counter > 30 {
+            panic!("maximum recursion depth exceeded while parsing an expression!")
+        }
         // First parse a prefix expression
         let mut left = self.parse_prefix();
         if left.output.is_none() {
@@ -104,6 +109,8 @@ impl Parser {
 
         // Keep parsing infix expressions as long as they have higher precedence
         while let Some(op_precedence) = self.peek_precedence() {
+            self.skip_whitespace(); // Safe to skip here - we're looking for infix operators
+
             if op_precedence < min_precedence {
                 break;
             }
@@ -130,7 +137,8 @@ impl Parser {
             // }
             Symbol::Dash => {
                 self.consume();
-                // Parse the operand with high precedence to ensure right association
+                self.skip_whitespace(); // Safe to skip after consuming the unary operator
+                                        // Parse the operand with high precedence to ensure right association
                 let operand = self.parse_expr(6);
                 if operand.output.is_none() {
                     return operand;
@@ -195,6 +203,7 @@ impl Parser {
                     return operator.transmute_error::<Expr>();
                 }
                 self.consume();
+                self.skip_whitespace(); // Safe to skip after operator
 
                 // Parse the right side with precedence one higher for left association
                 let right = self.parse_expr(op_precedence + 1);
@@ -348,27 +357,46 @@ mod tests {
         assert_eq!(expected, out.output.unwrap());
     }
 
-    // #[test]
-    // fn test_expr_4() {
-    //     let program_text = "2 + 5";
-    //     // Lex
-    //     let mut lexer = Lexer::new("test");
-    //     lexer.lex(&program_text);
-    //     println!("{:#?}", lexer.token_stream);
-    //     // Parse
-    //     let mut parser = Parser::new(lexer.token_stream);
-    //     let out = parser.parse_expr(0);
-    //     println!("{:#?}", out);
-    //     let expected = Expr::BinaryOp {
-    //         left: Box::new(Expr::IntegerLiteral(2)),
-    //         operator: BinaryOperator::Add,
-    //         right: Box::new(Expr::IntegerLiteral(5)),
-    //     };
-    //     assert_eq!(expected, out.output.unwrap());
-    // }
+    #[test]
+    fn test_expr_4() {
+        let program_text = "2+5";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        println!("{:#?}", lexer.token_stream);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_expr(0);
+        println!("{:#?}", out);
+        let expected = Expr::BinaryOp {
+            left: Box::new(Expr::IntegerLiteral(2)),
+            operator: BinaryOperator::Add,
+            right: Box::new(Expr::IntegerLiteral(5)),
+        };
+        assert_eq!(expected, out.output.unwrap());
+    }
 
     #[test]
     fn test_expr_5() {
+        let program_text = "2 + 5";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        println!("{:#?}", lexer.token_stream);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_expr(0);
+        println!("{:#?}", out);
+        let expected = Expr::BinaryOp {
+            left: Box::new(Expr::IntegerLiteral(2)),
+            operator: BinaryOperator::Add,
+            right: Box::new(Expr::IntegerLiteral(5)),
+        };
+        assert_eq!(expected, out.output.unwrap());
+    }
+
+    #[test]
+    fn test_expr_6() {
         let program_text = "add(2, 5)";
         // Lex
         let mut lexer = Lexer::new("test");

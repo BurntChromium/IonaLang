@@ -188,15 +188,19 @@ impl Lexer {
                 }
                 '+' => {
                     self.simple_add(Symbol::Plus, 1);
+                    chars.next();
                 }
                 '/' => {
                     self.simple_add(Symbol::Divide, 1);
+                    chars.next();
                 }
                 '*' => {
                     self.simple_add(Symbol::Times, 1);
+                    chars.next();
                 }
                 '%' => {
                     self.simple_add(Symbol::Modulo, 1);
+                    chars.next();
                 }
                 c if c.is_whitespace() => {
                     println!("some other space? {}", c);
@@ -318,6 +322,29 @@ mod tests {
         let mut lexer = Lexer::new("test");
         lexer.lex(&input_int);
         assert_eq!(lexer.token_stream[0].symbol, Symbol::Float(3947.2884));
+    }
+
+    #[test]
+    fn lex_add_infix() {
+        let input_int = "1 + 2";
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&input_int);
+        let symbols = lexer
+            .token_stream
+            .iter()
+            .map(|t| t.symbol.clone())
+            .collect::<Vec<Symbol>>();
+        assert_eq!(
+            symbols,
+            vec![
+                Symbol::Integer(1),
+                Symbol::Space,
+                Symbol::Plus,
+                Symbol::Space,
+                Symbol::Integer(2),
+                Symbol::NewLine
+            ]
+        );
     }
 
     #[test]

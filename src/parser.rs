@@ -8,6 +8,7 @@ use crate::lexer::{Symbol, Token};
 pub struct Parser {
     tokens: Vec<Token>,
     offset: usize,
+    pub recursion_counter: usize,
 }
 
 /// Golang-esque error handling to allow multiple returns
@@ -579,7 +580,11 @@ impl Parser {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { offset: 0, tokens }
+        Parser {
+            offset: 0,
+            tokens,
+            recursion_counter: 0,
+        }
     }
 
     /// Check the next token
@@ -606,7 +611,7 @@ impl Parser {
         )])
     }
 
-    fn skip_whitespace(&mut self) {
+    pub fn skip_whitespace(&mut self) {
         while matches!(self.peek().symbol, Symbol::Space | Symbol::NewLine)
             && self.offset < self.tokens.len()
             && self.offset < self.tokens.len() - 1
