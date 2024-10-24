@@ -230,14 +230,43 @@ impl Lexer {
                     }
                 }
                 c if c.is_numeric() => {
-                    let mut number: String = chars
-                        .by_ref()
-                        .take_while(|&ch| ch.is_numeric() || ch == '.') // Allow decimal point in take_while
-                        .collect();
+                    let mut number: String = c.to_string();
+                    chars.next();
+                    // For some reason `take_while` over consumes
+                    loop {
+                        let nc = chars.peek();
+                        match nc {
+                            Some(c) => {
+                                if c.is_numeric() || *c == '.' {
+                                    number.push(*c);
+                                    chars.next();
+                                } else {
+                                    break;
+                                }
+                            }
+                            None => {
+                                break;
+                            }
+                        }
+                    }
                     if number.contains('.') {
-                        let tail: String =
-                            chars.by_ref().take_while(|&ch| ch.is_numeric()).collect();
-                        number.push_str(&tail);
+                        // For some reason `take_while` over consumes
+                        loop {
+                            let nc = chars.peek();
+                            match nc {
+                                Some(c) => {
+                                    if c.is_numeric() || *c == '.' {
+                                        number.push(*c);
+                                        chars.next();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                None => {
+                                    break;
+                                }
+                            }
+                        }
                         if let Ok(f) = number.parse() {
                             self.simple_add(Symbol::Float(f), number.len());
                         } else {
@@ -354,7 +383,7 @@ mod tests {
         assert_eq!(
             symbols,
             vec![
-                Symbol::Identifier("foo".to_string()),
+                Symbol::Identifier("sub".to_string()),
                 Symbol::ParenOpen,
                 Symbol::Float(1.2),
                 Symbol::Comma,
