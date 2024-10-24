@@ -1,0 +1,11 @@
+enum Pets {
+	Dog,
+	Fish,
+	Bird,
+	Cat: Int,
+	
+	@metadata {
+		Is: [Public]
+		Derives: [Eq, Show]
+	}
+}

@@ -1,606 +1,757 @@
-//! Parse
+//! Recursive Descent Parser
+use crate::diagnostics::Diagnostic;
+use crate::lexer::{Symbol, Token};
 
-use chumsky::prelude::*;
+// -------------------- Parser Object --------------------
 
-// -------------------- Shared Tools --------------------
-
-pub const RESERVED_KEYWORDS: [&str; 6] = ["import", "is", "derives", "struct", "fn", "enum"];
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Type {
-    Integer,
-    Float,
-    String,
-    List(Box<Type>),
-    Tuple(Vec<Type>),
-    Custom(String),
-    Void,
+#[derive(Debug, Clone, PartialEq)]
+pub struct Parser {
+    tokens: Vec<Token>,
+    offset: usize,
+    pub recursion_counter: usize,
 }
 
-/// Parsing identifiers (stringy names that aren't reserved)
-fn ident_parser() -> impl Parser<char, String, Error = Simple<char>> {
-    text::ident()
-        .try_map(|s: String, span| {
-            if !RESERVED_KEYWORDS.contains(&&s.as_str()) {
-                Ok(s)
-            } else {
-                Err(Simple::custom(span, "Unexpected keyword"))
+/// Golang-esque error handling to allow multiple returns
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParserOutput<T> {
+    pub output: Option<T>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+impl<T> ParserOutput<T> {
+    pub fn okay(output: T) -> Self {
+        ParserOutput {
+            output: Some(output),
+            diagnostics: vec![],
+        }
+    }
+
+    pub fn err(diagnostics: Vec<Diagnostic>) -> Self {
+        ParserOutput {
+            output: None,
+            diagnostics,
+        }
+    }
+
+    /// Errors can be safely cast from one type to another because only the output varies
+    ///
+    /// This lets return a parser error from an "inner" parser error that returns type T from an outer parser that returns type O
+    pub fn transmute_error<O>(self) -> ParserOutput<O> {
+        ParserOutput {
+            output: None,
+            diagnostics: self.diagnostics,
+        }
+    }
+}
+
+pub trait ParserOutputExt<T> {
+    fn and_then<U, F>(self, f: F) -> ParserOutput<U>
+    where
+        F: FnOnce(T) -> ParserOutput<U>;
+
+    fn map<U, F>(self, f: F) -> ParserOutput<U>
+    where
+        F: FnOnce(T) -> U;
+
+    fn ignore(self) -> ParserOutput<()>;
+}
+
+impl<T> ParserOutputExt<T> for ParserOutput<T> {
+    fn and_then<U, F>(self, f: F) -> ParserOutput<U>
+    where
+        F: FnOnce(T) -> ParserOutput<U>,
+    {
+        match self.output {
+            Some(value) => {
+                let next = f(value);
+                ParserOutput {
+                    output: next.output,
+                    diagnostics: self
+                        .diagnostics
+                        .into_iter()
+                        .chain(next.diagnostics)
+                        .collect(),
+                }
             }
-        })
-        .padded()
-}
+            None => ParserOutput {
+                output: None,
+                diagnostics: self.diagnostics,
+            },
+        }
+    }
 
-fn camel_case_parser() -> impl Parser<char, String, Error = Simple<char>> {
-    filter(|c: &char| c.is_ascii_uppercase())
-        .chain(filter(|c: &char| c.is_ascii_alphanumeric()).repeated())
-        .collect::<String>()
-        .padded()
-}
+    fn map<U, F>(self, f: F) -> ParserOutput<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        ParserOutput {
+            output: self.output.map(f),
+            diagnostics: self.diagnostics,
+        }
+    }
 
-fn snake_case_parser() -> impl Parser<char, String, Error = Simple<char>> {
-    filter(|c: &char| c.is_ascii_lowercase() || *c == '_')
-        .chain(
-            filter(|c: &char| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_').repeated(),
-        )
-        .collect::<String>()
-        .padded()
-        .labelled("snake_case identifier")
-}
-
-fn type_parser() -> impl Parser<char, Type, Error = Simple<char>> {
-    recursive(|type_parser| {
-        let basic_type = choice((
-            text::keyword("int").to(Type::Integer),
-            text::keyword("float").to(Type::Float),
-            text::keyword("str").to(Type::String),
-        ));
-
-        let list_type = text::keyword("List")
-            .ignore_then(type_parser.clone().delimited_by(just('['), just(']')))
-            .map(|inner| Type::List(Box::new(inner)));
-
-        let tuple_type = text::keyword("Tuple")
-            .ignore_then(
-                type_parser
-                    .clone()
-                    .separated_by(just(',').padded())
-                    .at_least(1)
-                    .delimited_by(just('['), just(']')),
-            )
-            .map(|inner| Type::Tuple(inner));
-
-        let custom_type = camel_case_parser().map(Type::Custom);
-
-        choice((basic_type, list_type, tuple_type, custom_type))
-    })
+    fn ignore(self) -> ParserOutput<()> {
+        self.map(|_| ())
+    }
 }
 
 // -------------------- AST --------------------
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum ASTNode {
-    ImportStatement(Import),
-    TypeAliasDeclaration(TypeAlias),
-    StructDeclaration(Object),
-    EnumDeclaration(Object),
-    FunctionDeclaration(FunctionDeclaration),
-}
-
-fn ast_parser() -> impl Parser<char, Vec<ASTNode>, Error = Simple<char>> {
-    let import_node = import_parser().map(ASTNode::ImportStatement);
-    let alias_node = alias_parser().map(ASTNode::TypeAliasDeclaration);
-    let struct_node = struct_parser().map(ASTNode::StructDeclaration);
-    let enum_node = enum_parser().map(ASTNode::EnumDeclaration);
-    let function_node = function_parser().map(ASTNode::FunctionDeclaration);
-
-    let node = import_node
-        .or(alias_node)
-        .or(struct_node)
-        .or(enum_node)
-        .or(function_node);
-
-    node.padded().repeated().then_ignore(end())
-}
-
-pub fn parse_source(source: &str) -> Result<Vec<ASTNode>, Vec<Simple<char>>> {
-    ast_parser().parse(source)
-}
-
-// -------------------- Imports --------------------
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Import {
-    file: String,
-    items: Vec<String>,
-}
-
-fn import_parser() -> impl Parser<char, Import, Error = Simple<char>> {
-    let ident = ident_parser();
-
-    let file_name = ident_parser();
-
-    let items = just("with")
-        .ignore_then(ident.repeated().collect())
-        .or_not()
-        .map(|opt_items| opt_items.unwrap_or_default());
-
-    text::keyword("import")
-        .ignore_then(file_name.padded())
-        .then(items)
-        .map(|(file, items)| Import { file, items })
-        .then_ignore(just(';'))
-}
-
-// -------------------- Type Aliases --------------------
-
-/// Type aliases let you do stuff like `alias Salary = int`
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct TypeAlias {
-    name: String,
-    alias_of: Type,
-}
-
-fn alias_parser() -> impl Parser<char, TypeAlias, Error = Simple<char>> {
-    let camel_case = camel_case_parser();
-    let name = camel_case;
-    let alias_of = type_parser();
-
-    text::keyword("alias")
-        .ignore_then(name.padded())
-        .then(just('='))
-        .then(alias_of.padded())
-        .map(|(name, alias_of)| TypeAlias {
-            name: name.0,
-            alias_of,
-        })
-        .then_ignore(just(';'))
-}
-
-// -------------------- Objects --------------------
-
-/// An Object is either a struct or an enum because they have the same AST
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Object {
-    name: String,
-    fields: Vec<Field>,
-    props: Vec<ObjectProperties>,
-    derives: Vec<ObjectMethods>,
-}
-
-/// Note that `type_` may be the string `<Empty>`
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Field {
-    name: String,
-    type_: Type,
-}
-
-/// Properties for data types (Structs and Enums)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObjectProperties {
-    Public,
-    Export,
-}
-
-/// `Derivable` methods for data types (Structs and Enums)
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ObjectMethods {
-    Eq,
-    Log,
+pub enum Type {
+    Void,
+    Integer,
+    String,
+    Boolean,
+    Generic(String),
     Custom(String),
 }
 
-// -------------------- Struct Parsing --------------------
-
-pub fn struct_parser() -> impl Parser<char, Object, Error = Simple<char>> {
-    let camel_case = camel_case_parser();
-
-    let field = ident_parser()
-        .then(type_parser())
-        .map(|(name, type_)| Field { name, type_ });
-
-    let fields = field.separated_by(just("::")).at_least(1);
-
-    let property = choice((
-        text::keyword("Public")
-            .to(ObjectProperties::Public)
-            .labelled("Public"),
-        text::keyword("Export")
-            .to(ObjectProperties::Export)
-            .labelled("Export"),
-    ));
-
-    let struct_derives = choice((
-        text::keyword("Eq").to(ObjectMethods::Eq),
-        text::keyword("Log").to(ObjectMethods::Log),
-    ))
-    .or(ident_parser().map(ObjectMethods::Custom));
-
-    let properties = just("is")
-        .ignore_then(property.padded().repeated())
-        .or_not()
-        .map(|opt| opt.unwrap_or_default());
-
-    let derives = just("derives")
-        .ignore_then(struct_derives.padded().repeated())
-        .or_not()
-        .map(|opt| opt.unwrap_or_default());
-
-    text::keyword("struct")
-        .ignore_then(camel_case)
-        .then_ignore(just("="))
-        .then(fields)
-        .then(properties)
-        .then(derives)
-        .then_ignore(just(";"))
-        .map(|(((name, fields), properties), derives)| Object {
-            name,
-            fields,
-            props: properties,
-            derives,
-        })
-}
-
-// -------------------- Enum Parsing --------------------
-
-pub fn enum_parser() -> impl Parser<char, Object, Error = Simple<char>> {
-    let camel_case = camel_case_parser();
-
-    // Types are optional in an enum field, so they get mapped to `<Empty>`
-    let field = ident_parser()
-        .then(
-            type_parser()
-                .or_not()
-                .map(|opt_type| opt_type.unwrap_or_else(|| Type::Void)),
-        )
-        .map(|(name, type_)| Field { name, type_ });
-
-    let fields = field.separated_by(just("|")).at_least(1);
-
-    let property = choice((
-        text::keyword("Public")
-            .to(ObjectProperties::Public)
-            .labelled("Public"),
-        text::keyword("Export")
-            .to(ObjectProperties::Export)
-            .labelled("Export"),
-    ));
-
-    let struct_derives = choice((
-        text::keyword("Eq").to(ObjectMethods::Eq),
-        text::keyword("Log").to(ObjectMethods::Log),
-    ))
-    .or(ident_parser().map(ObjectMethods::Custom));
-
-    let properties = just("is")
-        .ignore_then(property.padded().repeated())
-        .or_not()
-        .map(|opt| opt.unwrap_or_default());
-
-    let derives = just("derives")
-        .ignore_then(struct_derives.padded().repeated())
-        .or_not()
-        .map(|opt| opt.unwrap_or_default());
-
-    text::keyword("enum")
-        .ignore_then(camel_case)
-        .then_ignore(just("="))
-        .then(fields)
-        .then(properties)
-        .then(derives)
-        .then_ignore(just(";"))
-        .map(|(((name, fields), properties), derives)| Object {
-            name,
-            fields,
-            props: properties,
-            derives,
-        })
-}
-
-// -------------------- Functions --------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FunctionProperties {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataProperties {
     Public,
     Export,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum FunctionPermissions {
+pub enum DataTraits {
+    Eq,
+    Show,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Field {
+    pub name: String,
+    pub field_type: Type,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Struct {
+    pub name: String,
+    pub fields: Vec<Field>,
+    pub properties: Vec<DataProperties>,
+    pub traits: Vec<DataTraits>,
+}
+
+/// An enum has the same shape as a struct but different rules
+///
+/// For clarity I separate the types, even though they're functionally identical
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Enum {
+    pub name: String,
+    pub fields: Vec<Field>,
+    pub properties: Vec<DataProperties>,
+    pub traits: Vec<DataTraits>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    pub file: String,
+    pub items: Vec<String>,
+}
+
+/// Functions can have different properties than Data Types
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionProperties {
+    Public,
+    Export,
+}
+
+/// Functions have a permissions/effects system
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionPermissions {
+    ReadFile,
+    WriteFile,
     ReadIO,
     WriteIO,
-    ReadFS,  // todo: allow scoping to specific paths?
-    WriteFS, // todo: allow scoping to specific paths?
     HTTPAny,
     HTTPGet,
     HTTPPost,
-    Any,
     Custom(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct FunctionDeclaration {
-    name: String,
-    args: Vec<Field>,
-    return_type: Type,
-    is: Vec<FunctionProperties>,
-    derives: Vec<FunctionPermissions>,
-    contract_in: Option<Expression>,
-    contract_out: Option<Expression>,
-    body: Vec<Statement>,
-    returns: Option<Expression>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Function {
+    pub name: String,
+    pub args: Vec<Field>,
+    pub returns: Type,
+    pub properties: Vec<FunctionProperties>,
+    pub permissions: Vec<FunctionPermissions>,
 }
 
-pub fn function_parser() -> impl Parser<char, FunctionDeclaration, Error = Simple<char>> {
-    let field = ident_parser()
-        .then(type_parser().padded())
-        .map(|(name, type_)| Field { name, type_ });
-
-    let fields = field.separated_by(just("::").padded());
-
-    let function_header = text::keyword("fn")
-        .ignore_then(snake_case_parser())
-        .then_ignore(just('=').padded())
-        .then(fields)
-        .then_ignore(just("->").padded())
-        .then(type_parser());
-
-    let prop_parser = choice((
-        text::keyword("Public").to(FunctionProperties::Public),
-        text::keyword("Export").to(FunctionProperties::Export),
-    ));
-
-    let requirements_parser = choice((
-        text::keyword("ReadIO").to(FunctionPermissions::ReadIO),
-        text::keyword("WriteIO").to(FunctionPermissions::WriteIO),
-        text::keyword("ReadFS").to(FunctionPermissions::ReadFS),
-        text::keyword("WriteFS").to(FunctionPermissions::WriteFS),
-        text::keyword("HTTPAny").to(FunctionPermissions::HTTPAny),
-        text::keyword("HTTPGet").to(FunctionPermissions::HTTPGet),
-        text::keyword("HTTPPost").to(FunctionPermissions::HTTPPost),
-        text::keyword("Any").to(FunctionPermissions::Any),
-    ))
-    .or(camel_case_parser().map(FunctionPermissions::Custom));
-
-    let function_props = text::keyword("Is")
-        .ignore_then(just(":").padded())
-        .ignore_then(prop_parser.padded().repeated())
-        .then_ignore(just(";").padded())
-        .or_not()
-        .map(|props| props.unwrap_or_default());
-
-    let function_requirements = text::keyword("Uses")
-        .ignore_then(just(":").padded())
-        .ignore_then(requirements_parser.padded().repeated())
-        .then_ignore(just(";").padded())
-        .or_not()
-        .map(|reqs| reqs.unwrap_or_default());
-
-    let contract_in = text::keyword("In")
-        .ignore_then(just(":").padded())
-        .padded()
-        .ignore_then(expression_parser())
-        .then_ignore(just(';').padded())
-        .padded();
-
-    let contract_out = text::keyword("Out")
-        .ignore_then(just(":").padded())
-        .padded()
-        .ignore_then(expression_parser())
-        .then_ignore(just(';').padded())
-        .padded();
-
-    let returns = text::keyword("return")
-        .padded()
-        .ignore_then(expression_parser())
-        .then_ignore(just(";").padded());
-
-    let function_body = just('{')
-        .padded()
-        .ignore_then(
-            choice((
-                function_props
-                    .then(function_requirements)
-                    .then(contract_in.or_not())
-                    .then(contract_out.or_not())
-                    .then(statement_parser().repeated())
-                    .then(returns.or_not()),
-                just('}').not()
-                    .repeated()
-                    .at_least(1)
-                    .to(Default::default())
-                    .map(|_| (((((vec![], vec![]), None), None), vec![]), None))
-                    .labelled("malformed function body"),
-            ))
-        )
-        .then_ignore(just("}").padded())
-        .recover_with(nested_delimiters(
-            '{',
-            '}',
-            [('(', ')'), ('[', ']')],
-            |_| (((((vec![], vec![]), None), None), vec![]), None)
-        ));
-
-    function_header.then(function_body).map(
-        |(
-            ((name, args), return_type),
-            (((((is, derives), contract_in), contract_out), body), returns),
-        )| {
-            FunctionDeclaration {
-                name,
-                args,
-                return_type,
-                is,
-                derives,
-                contract_in,
-                contract_out,
-                body,
-                returns,
-            }
-        },
-    )
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ASTNode {
+    StructDeclaration(Struct),
+    EnumDeclaration(Enum),
+    ImportStatement(Import),
 }
 
-// -------------------- Statements --------------------
+// -------------------- Parsers --------------------
 
-#[derive(Debug, Clone, PartialEq)]
-struct VariableDeclaration {
-    name: String,
-    v_type: Type,
-    attributes: Vec<VariableAttribute>,
-    value: Expression,
+// -------------------| Parse Types |--------------------
+
+impl Parser {
+    fn parse_type(&mut self) -> ParserOutput<Type> {
+        // Handle generics
+        if self.peek().symbol == Symbol::Generic {
+            self.then_ignore(Symbol::Generic);
+            self.then_ignore(Symbol::LeftAngle);
+            let generic = self
+                .then_identifier()
+                .and_then(|name| ParserOutput::okay(Type::Generic(name)));
+            self.then_ignore(Symbol::RightAngle);
+            return generic;
+        }
+        // Handle everything else
+        self.then_identifier().and_then(|name| match name.as_str() {
+            "Int" => ParserOutput::okay(Type::Integer),
+            "Str" => ParserOutput::okay(Type::String),
+            "Bool" => ParserOutput::okay(Type::Boolean),
+
+            _ => ParserOutput::okay(Type::Custom(name)),
+        })
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VariableAttribute {
-    Mutable,
-    ThreadSafe,
-}
+// -------------------| Parser Imports |--------------------
 
-#[derive(Debug, Clone, PartialEq)]
-struct Conditional {
-    condition: Expression,
-    effect: Statement,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum Statement {
-    VariableDecl(VariableDeclaration),
-    BareFuncCall(Expression),
-}
-
-fn variable_declaration_parser() -> impl Parser<char, VariableDeclaration, Error = Simple<char>> {
-    let attribute = choice((
-        just("Mutable").to(VariableAttribute::Mutable),
-        just("ThreadSafe").to(VariableAttribute::ThreadSafe),
-    ));
-
-    let attributes = just("::")
-        .ignore_then(attribute.repeated())
-        .collect::<Vec<_>>()
-        .or_not()
-        .map(Option::unwrap_or_default);
-
-    let declaration = just("let")
-        .ignore_then(snake_case_parser())
-        .then_ignore(just("::"))
-        .then(type_parser().padded())
-        .then(attributes)
-        .then_ignore(just("="))
-        .then(expression_parser())
-        .map(
-            |(((name, v_type), attributes), value)| VariableDeclaration {
-                name,
-                v_type,
-                attributes,
-                value,
-            },
-        );
-
-    declaration
-}
-
-fn statement_parser() -> impl Parser<char, Statement, Error = Simple<char>> {
-    let var_decl = variable_declaration_parser().map(Statement::VariableDecl);
-    let bare_fun = expression_parser().map(Statement::BareFuncCall);
-    var_decl.or(bare_fun)
-}
-
-// -------------------- Expressions --------------------
-
-#[derive(Debug, Clone, PartialEq)]
-struct ObjectField {
-    name: Box<ExpressionTerm>,
-    field: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum ExpressionTerm {
-    IntLiteral(i64),
-    FloatLiteral(f64),
-    StrLiteral(String),
-    TupleLiteral(Vec<ExpressionTerm>),
-    ListLiteral(Vec<ExpressionTerm>),
-    FieldAccess(ObjectField),
-    Identifier(String),
-}
-
-type Expression = Vec<ExpressionTerm>;
-
-fn expression_parser() -> impl Parser<char, Expression, Error = Simple<char>> {
-    expression_term_parser().padded().repeated().padded()
-}
-
-fn expression_term_parser() -> impl Parser<char, ExpressionTerm, Error = Simple<char>> {
-    recursive(|expr| {
-        let int_literal = text::int(10)
-            .map(|s: String| ExpressionTerm::IntLiteral(s.parse().unwrap()))
-            .padded();
-
-        // Floats that look like 42.1 or 42.
-        let float_with_decimal = text::int(10)
-            .then(just('.').then(text::digits(10)))
-            .map(|(whole, (_, frac))| {
-                ExpressionTerm::FloatLiteral(format!("{}.{}", whole, frac).parse().unwrap())
+impl Parser {
+    fn parse_import(&mut self) -> ParserOutput<Import> {
+        self.then_ignore(Symbol::Import)
+            .and_then(|_| self.with_whitespace(|p| p.then_identifier()))
+            .and_then(|file| {
+                self.with_whitespace(|p| p.then_ignore(Symbol::With))
+                    .and_then(|_| {
+                        self.parse_list_comma_separated(|p| {
+                            p.with_whitespace(|p| p.then_identifier())
+                        })
+                    })
+                    .and_then(|items| {
+                        self.then_ignore(Symbol::Semicolon)
+                            .map(|_| Import { file, items })
+                    })
             })
-            .padded();
+    }
+}
 
-        // Floats that look like 42f
-        let float_with_f = text::int(10)
-            .then(just('f'))
-            .map(|(base, _)| ExpressionTerm::FloatLiteral(base.parse().unwrap()))
-            .padded();
+// -------------------| Shared Parsers: Structs and Enums |--------------------
 
-        let float_literal = float_with_decimal.or(float_with_f);
+impl Parser {
+    fn parse_data_properties(&mut self) -> ParserOutput<DataProperties> {
+        self.then_identifier().and_then(|name| match name.as_str() {
+            "Public" => ParserOutput::okay(DataProperties::Public),
+            "Export" => ParserOutput::okay(DataProperties::Export),
+            other => self.single_error::<DataProperties>(&format!(
+                "expected 'Public' or 'Export', but received {}",
+                other
+            )),
+        })
+    }
 
-        let str_literal = just('"')
-            .ignore_then(none_of('"').repeated())
-            .then_ignore(just('"'))
-            .collect::<String>()
-            .map(ExpressionTerm::StrLiteral)
-            .padded();
+    fn parse_data_traits(&mut self) -> ParserOutput<DataTraits> {
+        self.then_identifier().and_then(|name| match name.as_str() {
+            "Eq" => ParserOutput::okay(DataTraits::Eq),
+            "Show" => ParserOutput::okay(DataTraits::Show),
+            other => self.single_error::<DataTraits>(&format!(
+                "expected 'Eq' or 'Show', but received {}",
+                other
+            )),
+        })
+    }
 
-        let tuple_literal = expr
-            .clone()
-            .separated_by(just(','))
-            .delimited_by(just('('), just(')'))
-            .map(ExpressionTerm::TupleLiteral)
-            .padded();
+    fn parse_metadata_list<T, F>(
+        &mut self,
+        expected_symbol: Symbol,
+        parse_item: F,
+    ) -> ParserOutput<Vec<T>>
+    where
+        F: Fn(&mut Self) -> ParserOutput<T>,
+    {
+        self.then_ignore(expected_symbol)
+            .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::Colon)))
+            .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BracketOpen)))
+            .and_then(|_| self.parse_list_comma_separated(|p| parse_item(p)))
+            .and_then(|values| self.then_ignore(Symbol::BracketClose).map(|_| values))
+    }
 
-        let list_literal = expr
-            .clone()
-            .separated_by(just(','))
-            .delimited_by(just('['), just(']'))
-            .map(ExpressionTerm::ListLiteral)
-            .padded();
+    fn parse_metadata_data_types(
+        &mut self,
+    ) -> ParserOutput<(Vec<DataProperties>, Vec<DataTraits>)> {
+        self.then_ignore(Symbol::Tag)
+            .and_then(|_| self.then_ignore(Symbol::Metadata))
+            .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen)))
+            .and_then(|_| {
+                let mut properties = Vec::new();
+                let mut traits = Vec::new();
+                let mut diagnostics = Vec::new();
 
-        let field_access = ident_parser()
-            .then(just('.').ignore_then(ident_parser()))
-            .map(|(name, field)| {
-                ExpressionTerm::FieldAccess(ObjectField {
-                    name: Box::new(ExpressionTerm::Identifier(name)),
-                    field,
+                loop {
+                    self.skip_whitespace();
+                    match self.peek().symbol {
+                        Symbol::Properties => {
+                            let result = self.parse_metadata_list(Symbol::Properties, |p| {
+                                p.parse_data_properties()
+                            });
+                            properties.extend(result.output.unwrap_or_default());
+                            diagnostics.extend(result.diagnostics);
+                        }
+                        Symbol::Traits => {
+                            let result =
+                                self.parse_metadata_list(Symbol::Traits, |p| p.parse_data_traits());
+                            traits.extend(result.output.unwrap_or_default());
+                            diagnostics.extend(result.diagnostics);
+                        }
+                        Symbol::BraceClose => break,
+                        _ => {
+                            diagnostics.push(Diagnostic::new_error_simple(
+                                "Unexpected token in metadata",
+                                &self.peek().pos,
+                            ));
+                            self.consume(); // Skip the unexpected token
+                        }
+                    }
+                }
+
+                ParserOutput {
+                    output: Some((properties, traits)),
+                    diagnostics,
+                }
+            })
+            .and_then(|metadata| self.then_ignore(Symbol::BraceClose).map(|_| metadata))
+    }
+}
+
+// -------------------| Struct Parsers |--------------------
+
+impl Parser {
+    fn parse_struct_declaration(&mut self) -> ParserOutput<String> {
+        self.then_ignore(Symbol::Struct)
+            .and_then(|_| self.with_whitespace(|p| p.then_identifier()))
+            .and_then(|name| {
+                self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen).map(|_| name))
+            })
+    }
+
+    fn parse_field_mandatory_type(&mut self) -> ParserOutput<Field> {
+        self.then_identifier().and_then(|name| {
+            self.with_whitespace(|p| p.then_ignore(Symbol::Colon))
+                .and_then(|_| self.with_whitespace(|p| p.parse_type()))
+                .map(|type_| Field {
+                    name,
+                    field_type: type_,
                 })
+        })
+    }
+
+    pub fn parse_struct(&mut self) -> ParserOutput<Struct> {
+        let name = self.parse_struct_declaration();
+        if name.output.is_none() {
+            return name.transmute_error::<Struct>();
+        }
+        let struct_name = name.output.clone().unwrap();
+        name.and_then(|_| {
+            self.parse_list_comma_separated(|p| {
+                p.with_whitespace(|p| p.parse_field_mandatory_type())
             })
-            .padded();
+        })
+        .and_then(|fields| {
+            let metadata = self.parse_metadata_data_types();
+            metadata.map(|(properties, traits)| Struct {
+                name: struct_name,
+                fields,
+                properties,
+                traits,
+            })
+        })
+        .and_then(|struct_| {
+            self.with_whitespace(|p| p.then_ignore(Symbol::BraceClose))
+                .map(|_| struct_)
+        })
+    }
+}
 
-        let identifier = ident_parser()
-            .map(ExpressionTerm::Identifier)
-            .padded();
+// -------------------| Enum Parsers |--------------------
 
-        let parenthesized_expr = expr.clone().delimited_by(just('('), just(')'));
+impl Parser {
+    fn parse_enum_declaration(&mut self) -> ParserOutput<String> {
+        self.then_ignore(Symbol::Enum)
+            .and_then(|_| self.with_whitespace(|p| p.then_identifier()))
+            .and_then(|name| {
+                self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen).map(|_| name))
+            })
+    }
 
-        choice((
-            list_literal,
-            tuple_literal,
-            float_literal,
-            field_access,
-            int_literal,
-            str_literal,
-            identifier,
-            parenthesized_expr,
-        ))
-        .then_ignore(just(';').or_not()) // Stop parsing when a semicolon is encountered
-    })
+    fn parse_field_optional_type(&mut self) -> ParserOutput<Field> {
+        self.then_identifier().and_then(|name| {
+            self.with_whitespace(|p| {
+                match p.peek().symbol {
+                    Symbol::Colon => {
+                        // This is a typed field
+                        p.then_ignore(Symbol::Colon)
+                            .and_then(|_| p.with_whitespace(|p| p.parse_type()))
+                            .map(|field_type| Field { name, field_type })
+                    }
+                    Symbol::Comma => {
+                        // This is a typeless field
+                        ParserOutput::okay(Field {
+                            name,
+                            field_type: Type::Void,
+                        })
+                    }
+                    _ => {
+                        let message = format!(
+                            "expected ':' or ',' after enum field name, but found {:?}",
+                            p.peek().symbol
+                        );
+                        p.single_error(&message)
+                    }
+                }
+            })
+        })
+    }
+
+    pub fn parse_enum(&mut self) -> ParserOutput<Enum> {
+        let name = self.parse_enum_declaration();
+        if name.output.is_none() {
+            return name.transmute_error::<Enum>();
+        }
+        let enum_name = name.output.clone().unwrap();
+        name.and_then(|_| {
+            self.parse_list_comma_separated(|p| {
+                p.with_whitespace(|p| p.parse_field_optional_type())
+            })
+        })
+        .and_then(|fields| {
+            let metadata = self.parse_metadata_data_types();
+            metadata.map(|(properties, traits)| Enum {
+                name: enum_name,
+                fields,
+                properties,
+                traits,
+            })
+        })
+        .and_then(|enum_| {
+            self.with_whitespace(|p| p.then_ignore(Symbol::BraceClose))
+                .map(|_| enum_)
+        })
+    }
+}
+
+// -------------------| Parse Top Level Nodes |-------------------
+
+impl Parser {
+    pub fn parse_all(&mut self) -> ParserOutput<Vec<ASTNode>> {
+        self.parse_list_newline_separated(|p| p.parse_top_level_declaration())
+    }
+
+    fn parse_top_level_declaration(&mut self) -> ParserOutput<ASTNode> {
+        self.skip_whitespace();
+        match self.peek().symbol {
+            Symbol::Struct => self.parse_struct().map(ASTNode::StructDeclaration),
+            Symbol::Enum => self.parse_enum().map(ASTNode::EnumDeclaration),
+            Symbol::Import => self.parse_import().map(ASTNode::ImportStatement),
+            _ => {
+                let message = format!(
+                    "expected a keyword such as 'fn', 'struct', or 'import', but found {:?}",
+                    self.peek().symbol
+                );
+                self.single_error(&message)
+            }
+        }
+    }
+}
+
+// -------------------| Parse Functions |--------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionDeclaration {
+    pub name: String,
+    pub parameters: Vec<Field>,
+    pub return_type: Type,
+}
+
+impl Parser {
+    /// Returns (Name, Args, ReturnType)
+    fn parse_function_declaration(&mut self) -> ParserOutput<FunctionDeclaration> {
+        // Parse "fn" keyword and function name
+        let fn_and_name = self
+            .then_ignore(Symbol::Function)
+            .and_then(|_| self.with_whitespace(|p| p.then_identifier()));
+
+        // Parse parameters and return type
+        let declaration = fn_and_name.and_then(|name| {
+            self.then_ignore(Symbol::ParenOpen)
+                .and_then(|_| self.parse_list_comma_separated(|p| p.parse_field_mandatory_type()))
+                .and_then(|parameters| {
+                    self.then_ignore(Symbol::ParenClose).and_then(|_| {
+                        // Parse return type arrow and type
+                        self.with_whitespace(|p| p.then_ignore(Symbol::Dash))
+                            .and_then(|_| self.then_ignore(Symbol::RightAngle))
+                            .and_then(|_| self.with_whitespace(|p| p.parse_type()))
+                            .map(|return_type| (name, parameters, return_type))
+                    })
+                })
+        });
+
+        // Parse opening brace and construct final result
+        declaration.and_then(|(name, parameters, return_type)| {
+            self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen))
+                .map(|_| FunctionDeclaration {
+                    name,
+                    parameters,
+                    return_type,
+                })
+        })
+    }
+
+    fn parse_fn_properties(&mut self) -> ParserOutput<FunctionProperties> {
+        self.then_identifier().and_then(|name| match name.as_str() {
+            "Public" => ParserOutput::okay(FunctionProperties::Public),
+            "Export" => ParserOutput::okay(FunctionProperties::Export),
+            other => self.single_error::<FunctionProperties>(&format!(
+                "expected 'Public' or 'Export', but received {}",
+                other
+            )),
+        })
+    }
+
+    fn parse_fn_permissions(&mut self) -> ParserOutput<FunctionPermissions> {
+        self.then_identifier().and_then(|name| match name.as_str() {
+            "ReadFile" => ParserOutput::okay(FunctionPermissions::ReadFile),
+            "WriteFile" => ParserOutput::okay(FunctionPermissions::WriteFile),
+            "ReadIO" => ParserOutput::okay(FunctionPermissions::ReadIO),
+            "WriteIO" => ParserOutput::okay(FunctionPermissions::WriteIO),
+            "HTTPAny" => ParserOutput::okay(FunctionPermissions::HTTPAny),
+            "HTTPGet" => ParserOutput::okay(FunctionPermissions::HTTPGet),
+            "HTTPPost" => ParserOutput::okay(FunctionPermissions::HTTPPost),
+            other => ParserOutput::okay(FunctionPermissions::Custom(other.to_string())),
+        })
+    }
+
+    fn parse_metadata_functions(
+        &mut self,
+    ) -> ParserOutput<(Vec<FunctionProperties>, Vec<FunctionPermissions>)> {
+        self.then_ignore(Symbol::Tag)
+            .and_then(|_| self.then_ignore(Symbol::Metadata))
+            .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen)))
+            .and_then(|_| {
+                let mut properties = Vec::new();
+                let mut traits = Vec::new();
+                let mut diagnostics = Vec::new();
+
+                loop {
+                    self.skip_whitespace();
+                    match self.peek().symbol {
+                        Symbol::Properties => {
+                            let result = self.parse_metadata_list(Symbol::Properties, |p| {
+                                p.parse_fn_properties()
+                            });
+                            properties.extend(result.output.unwrap_or_default());
+                            diagnostics.extend(result.diagnostics);
+                        }
+                        Symbol::Traits => {
+                            let result = self.parse_metadata_list(Symbol::Permissions, |p| {
+                                p.parse_fn_permissions()
+                            });
+                            traits.extend(result.output.unwrap_or_default());
+                            diagnostics.extend(result.diagnostics);
+                        }
+                        Symbol::BraceClose => break,
+                        _ => {
+                            diagnostics.push(Diagnostic::new_error_simple(
+                                "Unexpected token in metadata",
+                                &self.peek().pos,
+                            ));
+                            self.consume(); // Skip the unexpected token
+                        }
+                    }
+                }
+
+                ParserOutput {
+                    output: Some((properties, traits)),
+                    diagnostics,
+                }
+            })
+            .and_then(|metadata| self.then_ignore(Symbol::BraceClose).map(|_| metadata))
+    }
+}
+
+// -------------------- Parsing Utilities --------------------
+
+impl Parser {
+    pub fn new(tokens: Vec<Token>) -> Self {
+        Parser {
+            offset: 0,
+            tokens,
+            recursion_counter: 0,
+        }
+    }
+
+    /// Check the next token
+    ///
+    /// To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
+    pub fn peek(&self) -> &Token {
+        &self.tokens[self.offset]
+    }
+
+    /// Return the next token and advance the cursor
+    ///
+    /// To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
+    pub fn consume(&mut self) -> &Token {
+        let token = &self.tokens[self.offset];
+        self.offset += 1;
+        token
+    }
+
+    /// Helper method to create a single error from a given message
+    pub fn single_error<T>(&self, message: &str) -> ParserOutput<T> {
+        ParserOutput::err(vec![Diagnostic::new_error_simple(
+            message,
+            &self.peek().pos,
+        )])
+    }
+
+    pub fn skip_whitespace(&mut self) {
+        while matches!(self.peek().symbol, Symbol::Space | Symbol::NewLine)
+            && self.offset < self.tokens.len()
+            && self.offset < self.tokens.len() - 1
+        {
+            self.consume();
+        }
+    }
+
+    pub fn then_ignore(&mut self, expected: Symbol) -> ParserOutput<()> {
+        if self.peek().symbol == expected {
+            self.consume();
+            ParserOutput::okay(())
+        } else {
+            let message = format!(
+                "expected {:?}, but found {:?}",
+                expected,
+                self.peek().symbol
+            );
+            ParserOutput::err(vec![Diagnostic::new_error_simple(
+                &message,
+                &self.peek().pos,
+            )])
+        }
+    }
+
+    fn then_identifier(&mut self) -> ParserOutput<String> {
+        let next = self.consume();
+        match &next.symbol {
+            Symbol::Identifier(name) => ParserOutput::okay(name.to_string()),
+            _ => {
+                let message = format!("expected an identifier, but found {:?}", next.symbol);
+                ParserOutput::err(vec![Diagnostic::new_error_simple(&message, &next.pos)])
+            }
+        }
+    }
+
+    fn chain<T, F>(&mut self, f: F) -> ParserOutput<T>
+    where
+        F: FnOnce(&mut Self) -> ParserOutput<T>,
+    {
+        f(self)
+    }
+
+    fn with_whitespace<T, F>(&mut self, f: F) -> ParserOutput<T>
+    where
+        F: FnOnce(&mut Self) -> ParserOutput<T>,
+    {
+        self.skip_whitespace();
+        let result = f(self);
+        self.skip_whitespace();
+        result
+    }
+
+    /// This parses a list of comma separated items. It doesn't handle EOF.
+    pub fn parse_list_comma_separated<T, F>(&mut self, parse_item: F) -> ParserOutput<Vec<T>>
+    where
+        F: Fn(&mut Self) -> ParserOutput<T>,
+    {
+        let mut items = Vec::new();
+        let mut diagnostics = Vec::new();
+
+        loop {
+            match parse_item(self) {
+                ParserOutput {
+                    output: Some(item),
+                    diagnostics: item_diags,
+                } => {
+                    items.push(item);
+                    diagnostics.extend(item_diags);
+                    self.with_whitespace(|p| p.then_ignore(Symbol::Comma));
+                }
+                ParserOutput {
+                    output: None,
+                    diagnostics: item_diags,
+                } => {
+                    diagnostics.extend(item_diags);
+                    break;
+                }
+            }
+            // Symbols that denote the end of the list
+            if self.peek().symbol == Symbol::BraceClose
+                || self.peek().symbol == Symbol::BracketClose
+                || self.peek().symbol == Symbol::Tag
+                || self.peek().symbol == Symbol::Semicolon
+                || self.peek().symbol == Symbol::ParenClose
+            {
+                break;
+            }
+        }
+
+        ParserOutput {
+            output: Some(items),
+            diagnostics,
+        }
+    }
+
+    /// This parses higher level lists, like between AST nodes, that are newline separated. It does handle EOF.
+    fn parse_list_newline_separated<T, F>(&mut self, parse_item: F) -> ParserOutput<Vec<T>>
+    where
+        F: Fn(&mut Self) -> ParserOutput<T>,
+    {
+        let mut items = Vec::new();
+        let mut diagnostics = Vec::new();
+
+        while self.offset < self.tokens.len() {
+            self.skip_whitespace();
+            if self.offset >= self.tokens.len() {
+                break;
+            }
+
+            let initial_offset = self.offset;
+            match parse_item(self) {
+                ParserOutput {
+                    output: Some(item),
+                    diagnostics: item_diags,
+                } => {
+                    items.push(item);
+                    diagnostics.extend(item_diags);
+                }
+                ParserOutput {
+                    output: None,
+                    diagnostics: item_diags,
+                } => {
+                    diagnostics.extend(item_diags);
+                    // If we couldn't parse an item and didn't advance, break to avoid an infinite loop
+                    if self.offset == initial_offset {
+                        break;
+                    }
+                }
+            }
+
+            // Skip any trailing whitespace or newlines
+            self.skip_whitespace();
+        }
+
+        ParserOutput {
+            output: Some(items),
+            diagnostics,
+        }
+    }
 }
 
 // -------------------- Unit Tests --------------------
@@ -608,247 +759,32 @@ fn expression_term_parser() -> impl Parser<char, ExpressionTerm, Error = Simple<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lexer::Lexer;
 
     #[test]
-    fn test_type_parser_int() {
-        assert_eq!(Type::Integer, type_parser().parse("int").unwrap())
-    }
-
-    #[test]
-    fn test_type_parser_str() {
-        assert_eq!(Type::String, type_parser().parse("str").unwrap())
-    }
-
-    #[test]
-    fn test_type_parser_float() {
-        assert_eq!(Type::Float, type_parser().parse("float").unwrap())
-    }
-
-    #[test]
-    fn test_type_parser_list1() {
-        assert_eq!(
-            Type::List(Box::new(Type::Integer)),
-            type_parser().parse("List[int]").unwrap()
-        )
-    }
-
-    #[test]
-    fn test_type_parser_tuple1() {
-        assert_eq!(
-            Type::Tuple(vec![Type::Integer, Type::String]),
-            type_parser().parse("Tuple[int, str]").unwrap()
-        )
-    }
-
-    #[test]
-    fn test_type_parser_custom1() {
-        assert_eq!(
-            Type::Custom("Employee".to_string()),
-            type_parser().parse("Employee").unwrap()
-        )
-    }
-
-    #[test]
-    fn test_parse_expr_int() {
-        let input = "42";
-        let result = expression_parser().parse(input);
-        assert!(result.is_ok());
-        let value = result.unwrap();
-        assert_eq!(ExpressionTerm::IntLiteral(42), value[0]);
-    }
-
-    #[test]
-    fn test_parse_expr_float_1() {
-        let input = "42.27";
-        let result = expression_parser().parse(input);
-        assert!(result.is_ok());
-        let value = result.unwrap();
-        assert_eq!(ExpressionTerm::FloatLiteral(42.27), value[0]);
-    }
-
-    #[test]
-    fn test_parse_expr_float_2() {
-        let input = "42f";
-        let result = expression_parser().parse(input);
-        assert!(result.is_ok());
-        let value = result.unwrap();
-        assert_eq!(ExpressionTerm::FloatLiteral(42f64), value[0]);
-    }
-
-    #[test]
-    fn test_parse_expr_str() {
-        let input = "\"forty two\"";
-        let result = expression_parser().parse(input);
-        assert!(result.is_ok());
-        let value = result.unwrap();
-        assert_eq!(
-            ExpressionTerm::StrLiteral("forty two".to_string()),
-            value[0]
-        );
-    }
-
-    #[test]
-    fn test_parse_expr_field() {
-        let input = "obj.field";
-        let result = expression_parser().parse(input);
-        assert!(result.is_ok());
-        let value = result.unwrap();
-        assert_eq!(
-            ExpressionTerm::FieldAccess(ObjectField {
-                name: Box::new(ExpressionTerm::Identifier("obj".to_string())),
-                field: "field".to_string()
-            }),
-            value[0]
-        );
-    }
-
-    #[test]
-    fn test_parse_expr_fn_call_add_simple() {
-        let input = "add 1 2";
-        let result = expression_parser().parse(input);
-        assert!(result.is_ok());
-        let value = result.unwrap();
-        assert_eq!(
-            vec![
-                ExpressionTerm::Identifier("add".to_string()),
-                ExpressionTerm::IntLiteral(1),
-                ExpressionTerm::IntLiteral(2),
+    fn test_parse_fn_declaration() {
+        let program_text = "fn foo(a: Int, b: Int) -> Int {";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_function_declaration();
+        let expected = FunctionDeclaration {
+            name: "foo".to_string(),
+            parameters: vec![
+                Field {
+                    name: "a".to_string(),
+                    field_type: Type::Integer,
+                },
+                Field {
+                    name: "b".to_string(),
+                    field_type: Type::Integer,
+                },
             ],
-            value
-        );
-    }
-
-    #[test]
-    fn test_parse_expr_tuple() {
-        let input = "(1f, 2f, 3f)";
-        let result = expression_parser().parse(input);
-        match result {
-            Ok(value) => {
-                assert_eq!(
-                    ExpressionTerm::TupleLiteral(vec![
-                        ExpressionTerm::FloatLiteral(1f64),
-                        ExpressionTerm::FloatLiteral(2f64),
-                        ExpressionTerm::FloatLiteral(3f64)
-                    ]),
-                    value[0]
-                );
-            }
-            Err(e) => {
-                println!("{:?}", e);
-                assert_eq!(true, false);
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_expr_list_floats() {
-        let input = "[1f, 2f, 3f]";
-        let result = expression_parser().parse(input);
-        match result {
-            Ok(value) => {
-                assert_eq!(
-                    ExpressionTerm::ListLiteral(vec![
-                        ExpressionTerm::FloatLiteral(1f64),
-                        ExpressionTerm::FloatLiteral(2f64),
-                        ExpressionTerm::FloatLiteral(3f64)
-                    ]),
-                    value[0]
-                );
-            }
-            Err(e) => {
-                println!("{:?}", e);
-                assert_eq!(true, false);
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_expr_list_str() {
-        let input = "[\"a\", \"b\", \"c\"]";
-        let result = expression_parser().parse(input);
-        match result {
-            Ok(value) => {
-                assert_eq!(
-                    ExpressionTerm::ListLiteral(vec![
-                        ExpressionTerm::StrLiteral("a".to_string()),
-                        ExpressionTerm::StrLiteral("b".to_string()),
-                        ExpressionTerm::StrLiteral("c".to_string())
-                    ]),
-                    value[0]
-                );
-            }
-            Err(e) => {
-                println!("{:?}", e);
-                assert_eq!(true, false);
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_var_decl_1() {
-        let input = "let x :: int = 5;";
-        let result = variable_declaration_parser().parse(input);
-        match result {
-            Ok(value) => assert_eq!(
-                VariableDeclaration {
-                    name: "x".to_string(),
-                    v_type: Type::Integer,
-                    attributes: vec![],
-                    value: vec![ExpressionTerm::IntLiteral(5)]
-                },
-                value
-            ),
-            Err(e) => {
-                println!("{:?}", e);
-                assert_eq!(true, false);
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_fn_1() {
-        let input = r#"fn foo = a int :: b int -> int {
-            Is: Public;
-            In: gt a 0;
-            Out: gt this 0;
-            
-            let x :: int = 5;
-
-            return 5;
-        }"#;
-        let result = function_parser().parse(input);
-        match result {
-            Ok(value) => assert_eq!(
-                FunctionDeclaration {
-                    name: "foo".to_string(),
-                    args: vec![
-                        Field {
-                            name: "a".to_string(),
-                            type_: Type::Integer
-                        },
-                        Field {
-                            name: "b".to_string(),
-                            type_: Type::Integer
-                        }
-                    ],
-                    return_type: Type::Integer,
-                    is: vec![FunctionProperties::Public],
-                    derives: vec![],
-                    contract_in: None,
-                    contract_out: None,
-                    body: vec![],
-                    returns: Some(vec![
-                        ExpressionTerm::Identifier("div".to_string()),
-                        ExpressionTerm::Identifier("a".to_string()),
-                        ExpressionTerm::Identifier("b".to_string()),
-                    ])
-                },
-                value
-            ),
-            Err(e) => {
-                println!("{:?}", e);
-                assert_eq!(true, false);
-            }
-        }
+            return_type: Type::Integer,
+        };
+        assert!(out.output.is_some());
+        assert_eq!(out.output.unwrap(), expected);
     }
 }
