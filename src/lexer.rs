@@ -1,5 +1,6 @@
 //! Split text stream into tokens
 
+use crate::diagnostics::Diagnostic;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +44,6 @@ pub enum Symbol {
     LessThan,
     GreaterThan,
     Plus,
-    Minus,
     Times,
     Divide,
     Modulo,
@@ -79,6 +79,7 @@ impl fmt::Display for Token {
 pub struct Lexer {
     pub token_stream: Vec<Token>,
     position: SourcePosition,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl Lexer {
@@ -90,6 +91,7 @@ impl Lexer {
                 line: 0,
                 column: 0,
             },
+            diagnostics: Vec::new(),
         }
     }
 
@@ -184,6 +186,18 @@ impl Lexer {
                     self.simple_add(Symbol::Comma, 1);
                     chars.next();
                 }
+                '+' => {
+                    self.simple_add(Symbol::Plus, 1);
+                }
+                '/' => {
+                    self.simple_add(Symbol::Divide, 1);
+                }
+                '*' => {
+                    self.simple_add(Symbol::Times, 1);
+                }
+                '%' => {
+                    self.simple_add(Symbol::Modulo, 1);
+                }
                 c if c.is_whitespace() => {
                     println!("some other space? {}", c);
                     self.simple_add(Symbol::Space, c.len_utf8());
@@ -237,8 +251,12 @@ impl Lexer {
                         }
                     }
                 }
-                _ => {
+                other => {
                     // Handle unexpected characters
+                    self.diagnostics.push(Diagnostic::new_error_simple(
+                        &format!("Unexpected symbol in program {}", other),
+                        &self.position,
+                    ));
                     chars.next();
                 }
             }
@@ -271,5 +289,80 @@ mod tests {
         let mut lexer = Lexer::new("test");
         lexer.lex(&input_int);
         assert_eq!(lexer.token_stream[0].symbol, Symbol::Float(3947.2884));
+    }
+
+    #[test]
+    fn lex_function_call_variables() {
+        let input_int = "foo(a, b)";
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&input_int);
+        let symbols = lexer
+            .token_stream
+            .iter()
+            .map(|t| t.symbol.clone())
+            .collect::<Vec<Symbol>>();
+        assert_eq!(
+            symbols,
+            vec![
+                Symbol::Identifier("foo".to_string()),
+                Symbol::ParenOpen,
+                Symbol::Identifier("a".to_string()),
+                Symbol::Comma,
+                Symbol::Space,
+                Symbol::Identifier("b".to_string()),
+                Symbol::ParenClose,
+                Symbol::NewLine
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_function_call_ints() {
+        let input_int = "foo(1, 2)";
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&input_int);
+        let symbols = lexer
+            .token_stream
+            .iter()
+            .map(|t| t.symbol.clone())
+            .collect::<Vec<Symbol>>();
+        assert_eq!(
+            symbols,
+            vec![
+                Symbol::Identifier("foo".to_string()),
+                Symbol::ParenOpen,
+                Symbol::Integer(1),
+                Symbol::Comma,
+                Symbol::Space,
+                Symbol::Integer(2),
+                Symbol::ParenClose,
+                Symbol::NewLine
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_function_call_floats() {
+        let input_int = "sub(1.2, 3.4)";
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&input_int);
+        let symbols = lexer
+            .token_stream
+            .iter()
+            .map(|t| t.symbol.clone())
+            .collect::<Vec<Symbol>>();
+        assert_eq!(
+            symbols,
+            vec![
+                Symbol::Identifier("foo".to_string()),
+                Symbol::ParenOpen,
+                Symbol::Float(1.2),
+                Symbol::Comma,
+                Symbol::Space,
+                Symbol::Float(3.4),
+                Symbol::ParenClose,
+                Symbol::NewLine
+            ]
+        );
     }
 }

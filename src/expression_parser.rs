@@ -56,7 +56,7 @@ pub enum Expr {
         operand: Box<Expr>,
     },
 
-    // List indexing
+    // List and tuple indexing
     IndexAccess {
         object: Box<Expr>,
         index: Box<Expr>,
@@ -65,15 +65,15 @@ pub enum Expr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
-    Add,         // +
-    Subtract,    // -
-    Multiply,    // *
-    Divide,      // /
-    Modulo,      // %
-    LessThan,    // <
-    GreaterThan, // >
-    And,         // and
-    Or,          // or
+    Add,        // +
+    Subtract,   // -
+    Multiply,   // *
+    Divide,     // /
+    Modulo,     // %
+    LeftAngle,  // <
+    RightAngle, // >
+    And,        // and
+    Or,         // or
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,8 +86,8 @@ const fn precedence(op: &Symbol) -> u8 {
     match op {
         Symbol::Or => 1,
         Symbol::And => 2,
-        Symbol::LessThan | Symbol::GreaterThan => 3,
-        Symbol::Plus | Symbol::Minus => 4,
+        Symbol::LeftAngle | Symbol::RightAngle => 3,
+        Symbol::Plus | Symbol::Dash => 4,
         Symbol::Times | Symbol::Divide | Symbol::Modulo => 5,
         Symbol::Dot => 6, // Property access and method calls
         _ => 0,
@@ -114,6 +114,7 @@ impl Parser {
     }
 
     fn parse_prefix(&mut self) -> ParserOutput<Expr> {
+        // We have to clone the peek because match is immutable and consume is mutable
         match &self.peek().symbol.clone() {
             Symbol::Integer(n) => {
                 self.consume();
@@ -127,7 +128,7 @@ impl Parser {
             //     self.consume();
             //     ParserOutput::okay(Expr::StringLiteral(s.clone()))
             // }
-            Symbol::Minus => {
+            Symbol::Dash => {
                 self.consume();
                 // Parse the operand with high precedence to ensure right association
                 let operand = self.parse_expr(6);
@@ -179,19 +180,20 @@ impl Parser {
     fn parse_infix(&mut self, left: Expr) -> ParserOutput<Expr> {
         match &self.peek().symbol {
             Symbol::Plus
-            | Symbol::Minus
+            | Symbol::Dash
             | Symbol::Times
             | Symbol::Divide
             | Symbol::Modulo
-            | Symbol::LessThan
-            | Symbol::GreaterThan
+            | Symbol::LeftAngle
+            | Symbol::RightAngle
             | Symbol::And
             | Symbol::Or => {
+                let op_precedence = precedence(&self.peek().symbol);
+
                 let operator = self.parse_binary_operator();
                 if operator.output.is_none() {
                     return operator.transmute_error::<Expr>();
                 }
-                let op_precedence = precedence(&self.peek().symbol);
                 self.consume();
 
                 // Parse the right side with precedence one higher for left association
@@ -264,12 +266,12 @@ impl Parser {
     fn parse_binary_operator(&mut self) -> ParserOutput<BinaryOperator> {
         match &self.peek().symbol {
             Symbol::Plus => ParserOutput::okay(BinaryOperator::Add),
-            Symbol::Minus => ParserOutput::okay(BinaryOperator::Subtract),
+            Symbol::Dash => ParserOutput::okay(BinaryOperator::Subtract),
             Symbol::Times => ParserOutput::okay(BinaryOperator::Multiply),
             Symbol::Divide => ParserOutput::okay(BinaryOperator::Divide),
             Symbol::Modulo => ParserOutput::okay(BinaryOperator::Modulo),
-            Symbol::LessThan => ParserOutput::okay(BinaryOperator::LessThan),
-            Symbol::GreaterThan => ParserOutput::okay(BinaryOperator::GreaterThan),
+            Symbol::LeftAngle => ParserOutput::okay(BinaryOperator::LeftAngle),
+            Symbol::RightAngle => ParserOutput::okay(BinaryOperator::RightAngle),
             Symbol::And => ParserOutput::okay(BinaryOperator::And),
             Symbol::Or => ParserOutput::okay(BinaryOperator::Or),
             _ => self.single_error("Expected binary operator"),
@@ -277,14 +279,15 @@ impl Parser {
     }
 
     fn peek_precedence(&self) -> Option<u8> {
+        // If we have any of these symbols, run the precedence function on it
         match &self.peek().symbol {
             Symbol::Plus
-            | Symbol::Minus
+            | Symbol::Dash
             | Symbol::Times
             | Symbol::Divide
             | Symbol::Modulo
-            | Symbol::LessThan
-            | Symbol::GreaterThan
+            | Symbol::LeftAngle
+            | Symbol::RightAngle
             | Symbol::And
             | Symbol::Or
             | Symbol::Dot
@@ -311,6 +314,74 @@ mod tests {
         let mut parser = Parser::new(lexer.token_stream);
         let out = parser.parse_expr(0);
         let expected = Expr::IntegerLiteral(5);
+        assert_eq!(expected, out.output.unwrap());
+    }
+
+    #[test]
+    fn test_expr_2() {
+        let program_text = "5.39";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_expr(0);
+        let expected = Expr::FloatLiteral(5.39);
+        assert_eq!(expected, out.output.unwrap());
+    }
+
+    #[test]
+    fn test_expr_3() {
+        let program_text = "-5";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        println!("{:#?}", lexer.token_stream);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_expr(0);
+        println!("{:#?}", out);
+        let expected = Expr::UnaryOp {
+            operator: UnaryOperator::Negate,
+            operand: Box::new(Expr::IntegerLiteral(5)),
+        };
+        assert_eq!(expected, out.output.unwrap());
+    }
+
+    // #[test]
+    // fn test_expr_4() {
+    //     let program_text = "2 + 5";
+    //     // Lex
+    //     let mut lexer = Lexer::new("test");
+    //     lexer.lex(&program_text);
+    //     println!("{:#?}", lexer.token_stream);
+    //     // Parse
+    //     let mut parser = Parser::new(lexer.token_stream);
+    //     let out = parser.parse_expr(0);
+    //     println!("{:#?}", out);
+    //     let expected = Expr::BinaryOp {
+    //         left: Box::new(Expr::IntegerLiteral(2)),
+    //         operator: BinaryOperator::Add,
+    //         right: Box::new(Expr::IntegerLiteral(5)),
+    //     };
+    //     assert_eq!(expected, out.output.unwrap());
+    // }
+
+    #[test]
+    fn test_expr_5() {
+        let program_text = "add(2, 5)";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        println!("{:#?}", lexer.token_stream);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_expr(0);
+        println!("{:#?}", out);
+        let expected = Expr::FunctionCall {
+            name: "add".to_string(),
+            arguments: vec![Expr::IntegerLiteral(2), Expr::IntegerLiteral(5)],
+        };
         assert_eq!(expected, out.output.unwrap());
     }
 }
