@@ -1,5 +1,6 @@
 //! Recursive Descent Parser
 use crate::diagnostics::Diagnostic;
+use crate::expression_parser::Expr;
 use crate::lexer::{Symbol, Token};
 
 // -------------------- Parser Object --------------------
@@ -170,13 +171,14 @@ pub enum FunctionPermissions {
     Custom(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
     pub args: Vec<Field>,
     pub returns: Type,
     pub properties: Vec<FunctionProperties>,
     pub permissions: Vec<FunctionPermissions>,
+    pub contracts: Vec<FunctionContract>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,6 +189,30 @@ pub enum ASTNode {
 }
 
 // -------------------- Parsers --------------------
+
+// -------------------| Parse Top Level Nodes |-------------------
+
+impl Parser {
+    pub fn parse_all(&mut self) -> ParserOutput<Vec<ASTNode>> {
+        self.parse_list_newline_separated(|p| p.parse_top_level_declaration())
+    }
+
+    fn parse_top_level_declaration(&mut self) -> ParserOutput<ASTNode> {
+        self.skip_whitespace();
+        match self.peek().symbol {
+            Symbol::Struct => self.parse_struct().map(ASTNode::StructDeclaration),
+            Symbol::Enum => self.parse_enum().map(ASTNode::EnumDeclaration),
+            Symbol::Import => self.parse_import().map(ASTNode::ImportStatement),
+            _ => {
+                let message = format!(
+                    "expected a keyword such as 'fn', 'struct', or 'import', but found {:?}",
+                    self.peek().symbol
+                );
+                self.single_error(&message)
+            }
+        }
+    }
+}
 
 // -------------------| Parse Types |--------------------
 
@@ -437,30 +463,6 @@ impl Parser {
     }
 }
 
-// -------------------| Parse Top Level Nodes |-------------------
-
-impl Parser {
-    pub fn parse_all(&mut self) -> ParserOutput<Vec<ASTNode>> {
-        self.parse_list_newline_separated(|p| p.parse_top_level_declaration())
-    }
-
-    fn parse_top_level_declaration(&mut self) -> ParserOutput<ASTNode> {
-        self.skip_whitespace();
-        match self.peek().symbol {
-            Symbol::Struct => self.parse_struct().map(ASTNode::StructDeclaration),
-            Symbol::Enum => self.parse_enum().map(ASTNode::EnumDeclaration),
-            Symbol::Import => self.parse_import().map(ASTNode::ImportStatement),
-            _ => {
-                let message = format!(
-                    "expected a keyword such as 'fn', 'struct', or 'import', but found {:?}",
-                    self.peek().symbol
-                );
-                self.single_error(&message)
-            }
-        }
-    }
-}
-
 // -------------------| Parse Functions |--------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -468,6 +470,19 @@ struct FunctionDeclaration {
     pub name: String,
     pub parameters: Vec<Field>,
     pub return_type: Type,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContractType {
+    Input,
+    Output,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionContract {
+    type_: ContractType,
+    condition: Expr,
+    message: String,
 }
 
 impl Parser {
@@ -573,6 +588,104 @@ impl Parser {
                 }
             })
             .and_then(|metadata| self.then_ignore(Symbol::BraceClose).map(|_| metadata))
+    }
+
+    fn parse_contracts(&mut self) -> ParserOutput<Vec<FunctionContract>> {
+        self.then_ignore(Symbol::Tag)
+            .and_then(|_| self.then_ignore(Symbol::Contract))
+            .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen)))
+            .and_then(|_| {
+                let mut contracts = Vec::new();
+                let mut diagnostics = Vec::new();
+
+                loop {
+                    self.skip_whitespace();
+                    match self.peek().symbol {
+                        Symbol::In | Symbol::Out => {
+                            let contract_type = match self.peek().symbol {
+                                Symbol::In => ContractType::Input,
+                                Symbol::Out => ContractType::Output,
+                                _ => unreachable!(),
+                            };
+                            self.consume(); // Consume In/Out
+
+                            // Parse ": ("
+                            let result = self.then_ignore(Symbol::Colon).and_then(|_| {
+                                self.with_whitespace(|p| p.then_ignore(Symbol::ParenOpen))
+                            });
+
+                            if result.output.is_none() {
+                                diagnostics.extend(result.diagnostics);
+                                continue;
+                            }
+
+                            // Parse the condition expression
+                            self.skip_whitespace();
+                            let condition = self.parse_expr(0);
+                            if condition.output.is_none() {
+                                diagnostics.extend(condition.diagnostics);
+                                continue;
+                            }
+
+                            // Parse ", "
+                            let comma_result =
+                                self.with_whitespace(|p| p.then_ignore(Symbol::Comma));
+                            if comma_result.output.is_none() {
+                                diagnostics.extend(comma_result.diagnostics);
+                                continue;
+                            }
+
+                            // Parse the error message string
+                            self.skip_whitespace();
+                            let message = match &self.peek().symbol.clone() {
+                                Symbol::Identifier(s) => {
+                                    self.consume();
+                                    s.clone()
+                                }
+                                _ => {
+                                    diagnostics.push(Diagnostic::new_error_simple(
+                                        "Expected string for contract message",
+                                        &self.peek().pos,
+                                    ));
+                                    continue;
+                                }
+                            };
+
+                            // Parse closing paren and semicolon
+                            let close_result = self
+                                .with_whitespace(|p| p.then_ignore(Symbol::ParenClose))
+                                .and_then(|_| {
+                                    self.with_whitespace(|p| p.then_ignore(Symbol::Semicolon))
+                                });
+
+                            if close_result.output.is_none() {
+                                diagnostics.extend(close_result.diagnostics);
+                                continue;
+                            }
+
+                            contracts.push(FunctionContract {
+                                type_: contract_type,
+                                condition: condition.output.unwrap(),
+                                message,
+                            });
+                        }
+                        Symbol::BraceClose => break,
+                        _ => {
+                            diagnostics.push(Diagnostic::new_error_simple(
+                                "Unexpected token in contracts",
+                                &self.peek().pos,
+                            ));
+                            self.consume(); // Skip the unexpected token
+                        }
+                    }
+                }
+
+                ParserOutput {
+                    output: Some(contracts),
+                    diagnostics,
+                }
+            })
+            .and_then(|contracts| self.then_ignore(Symbol::BraceClose).map(|_| contracts))
     }
 }
 

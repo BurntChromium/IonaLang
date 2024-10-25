@@ -95,7 +95,7 @@ const fn precedence(op: &Symbol) -> u8 {
 }
 
 impl Parser {
-    fn parse_expr(&mut self, min_precedence: u8) -> ParserOutput<Expr> {
+    pub fn parse_expr(&mut self, min_precedence: u8) -> ParserOutput<Expr> {
         // Track our recursion depth
         self.recursion_counter += 1;
         if self.recursion_counter > 30 {
