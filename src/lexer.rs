@@ -1,6 +1,7 @@
 //! Split text stream into tokens
 
 use crate::diagnostics::Diagnostic;
+use core::panic;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +14,7 @@ pub struct SourcePosition {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Symbol {
     Identifier(String),
+    StringLiteral(String),
     Integer(i64),
     Float(f64),
     Import,
@@ -25,7 +27,7 @@ pub enum Symbol {
     Comma,
     Tag, // @
     Metadata,
-    Contract,
+    Contracts,
     In,
     Out,
     Properties,
@@ -229,9 +231,9 @@ impl Lexer {
                         "fn" => self.simple_add(Symbol::Function, word_len),
                         "with" => self.simple_add(Symbol::With, word_len),
                         "metadata" => self.simple_add(Symbol::Metadata, word_len),
-                        "contract" => self.simple_add(Symbol::Contract, word_len),
-                        "in" => self.simple_add(Symbol::In, word_len),
-                        "out" => self.simple_add(Symbol::Out, word_len),
+                        "contracts" => self.simple_add(Symbol::Contracts, word_len),
+                        "In" => self.simple_add(Symbol::In, word_len),
+                        "Out" => self.simple_add(Symbol::Out, word_len),
                         "Is" => self.simple_add(Symbol::Properties, word_len),
                         "Derives" => self.simple_add(Symbol::Traits, word_len),
                         "Uses" => self.simple_add(Symbol::Permissions, word_len),
@@ -289,6 +291,38 @@ impl Lexer {
                             // Handle error
                         }
                     }
+                }
+                c if c == '"' => {
+                    // ~5MB of raw string data
+                    const LEXER_STRING_LEN_LIMIT: usize = 5120;
+                    // Handle string literals
+                    let mut new_string: String = String::new();
+                    chars.next(); // eat opening paren
+                    let mut counter: usize = 0;
+                    loop {
+                        let nc = chars.peek();
+                        match nc {
+                            Some(c) => {
+                                // TODO: handle string escapes
+                                if *c == '"' {
+                                    break;
+                                } else {
+                                    new_string.push(*c);
+                                    chars.next();
+                                }
+                            }
+                            None => {
+                                break;
+                            }
+                        }
+                        counter += 1;
+                        if counter > LEXER_STRING_LEN_LIMIT {
+                            panic!("Fatal error: string literal length limit exceeded (currently set to 5MB). Consider putting the string in a file instead.");
+                        }
+                    }
+                    let string_len = new_string.len();
+                    self.simple_add(Symbol::StringLiteral(new_string), string_len);
+                    chars.next(); // eat closing paren
                 }
                 other => {
                     // Handle unexpected characters

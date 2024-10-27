@@ -543,7 +543,7 @@ impl Parser {
         })
     }
 
-    fn parse_metadata_functions(
+    fn parse_function_metadata(
         &mut self,
     ) -> ParserOutput<(Vec<FunctionProperties>, Vec<FunctionPermissions>)> {
         self.then_ignore(Symbol::Tag)
@@ -556,7 +556,7 @@ impl Parser {
 
                 loop {
                     self.skip_whitespace();
-                    match self.peek().symbol {
+                    match self.peek().symbol.clone() {
                         Symbol::Properties => {
                             let result = self.parse_metadata_list(Symbol::Properties, |p| {
                                 p.parse_fn_properties()
@@ -564,7 +564,7 @@ impl Parser {
                             properties.extend(result.output.unwrap_or_default());
                             diagnostics.extend(result.diagnostics);
                         }
-                        Symbol::Traits => {
+                        Symbol::Permissions => {
                             let result = self.parse_metadata_list(Symbol::Permissions, |p| {
                                 p.parse_fn_permissions()
                             });
@@ -572,9 +572,9 @@ impl Parser {
                             diagnostics.extend(result.diagnostics);
                         }
                         Symbol::BraceClose => break,
-                        _ => {
+                        other => {
                             diagnostics.push(Diagnostic::new_error_simple(
-                                "Unexpected token in metadata",
+                                &format!("encountered an unexpected symbol parsing function metadata: found {:?}, expected `Is` (Properties), `Uses` (Permissions), or `}}`", other),
                                 &self.peek().pos,
                             ));
                             self.consume(); // Skip the unexpected token
@@ -590,9 +590,9 @@ impl Parser {
             .and_then(|metadata| self.then_ignore(Symbol::BraceClose).map(|_| metadata))
     }
 
-    fn parse_contracts(&mut self) -> ParserOutput<Vec<FunctionContract>> {
+    fn parse_function_contracts(&mut self) -> ParserOutput<Vec<FunctionContract>> {
         self.then_ignore(Symbol::Tag)
-            .and_then(|_| self.then_ignore(Symbol::Contract))
+            .and_then(|_| self.then_ignore(Symbol::Contracts))
             .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen)))
             .and_then(|_| {
                 let mut contracts = Vec::new();
@@ -600,7 +600,7 @@ impl Parser {
 
                 loop {
                     self.skip_whitespace();
-                    match self.peek().symbol {
+                    match self.peek().symbol.clone() {
                         Symbol::In | Symbol::Out => {
                             let contract_type = match self.peek().symbol {
                                 Symbol::In => ContractType::Input,
@@ -616,6 +616,7 @@ impl Parser {
 
                             if result.output.is_none() {
                                 diagnostics.extend(result.diagnostics);
+                                self.skip_to_next_newline();
                                 continue;
                             }
 
@@ -624,6 +625,7 @@ impl Parser {
                             let condition = self.parse_expr(0);
                             if condition.output.is_none() {
                                 diagnostics.extend(condition.diagnostics);
+                                self.skip_to_next_newline();
                                 continue;
                             }
 
@@ -632,13 +634,14 @@ impl Parser {
                                 self.with_whitespace(|p| p.then_ignore(Symbol::Comma));
                             if comma_result.output.is_none() {
                                 diagnostics.extend(comma_result.diagnostics);
+                                self.skip_to_next_newline();
                                 continue;
                             }
 
                             // Parse the error message string
                             self.skip_whitespace();
                             let message = match &self.peek().symbol.clone() {
-                                Symbol::Identifier(s) => {
+                                Symbol::StringLiteral(s) => {
                                     self.consume();
                                     s.clone()
                                 }
@@ -647,19 +650,18 @@ impl Parser {
                                         "Expected string for contract message",
                                         &self.peek().pos,
                                     ));
+                                    self.skip_to_next_newline();
                                     continue;
                                 }
                             };
 
-                            // Parse closing paren and semicolon
-                            let close_result = self
-                                .with_whitespace(|p| p.then_ignore(Symbol::ParenClose))
-                                .and_then(|_| {
-                                    self.with_whitespace(|p| p.then_ignore(Symbol::Semicolon))
-                                });
+                            // Parse closing paren
+                            let close_result =
+                                self.with_whitespace(|p| p.then_ignore(Symbol::ParenClose));
 
                             if close_result.output.is_none() {
                                 diagnostics.extend(close_result.diagnostics);
+                                self.skip_to_next_newline();
                                 continue;
                             }
 
@@ -670,19 +672,25 @@ impl Parser {
                             });
                         }
                         Symbol::BraceClose => break,
-                        _ => {
+                        other => {
                             diagnostics.push(Diagnostic::new_error_simple(
-                                "Unexpected token in contracts",
+                                &format!("Unexpected symbol in contract declaration: {:?}", other),
                                 &self.peek().pos,
                             ));
                             self.consume(); // Skip the unexpected token
                         }
                     }
                 }
-
-                ParserOutput {
-                    output: Some(contracts),
-                    diagnostics,
+                if contracts.len() > 0 {
+                    ParserOutput {
+                        output: Some(contracts),
+                        diagnostics,
+                    }
+                } else {
+                    ParserOutput {
+                        output: None,
+                        diagnostics,
+                    }
                 }
             })
             .and_then(|contracts| self.then_ignore(Symbol::BraceClose).map(|_| contracts))
@@ -776,6 +784,20 @@ impl Parser {
         let result = f(self);
         self.skip_whitespace();
         result
+    }
+
+    fn skip_to_next_newline(&mut self) {
+        loop {
+            match &self.peek().symbol {
+                Symbol::NewLine => {
+                    self.consume();
+                    break;
+                }
+                _ => {
+                    self.consume();
+                }
+            }
+        }
     }
 
     /// This parses a list of comma separated items. It doesn't handle EOF.
@@ -872,10 +894,11 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expression_parser::BinaryOperator;
     use crate::lexer::Lexer;
 
     #[test]
-    fn test_parse_fn_declaration() {
+    fn parse_fn_declaration() {
         let program_text = "fn foo(a: Int, b: Int) -> Int {";
         // Lex
         let mut lexer = Lexer::new("test");
@@ -899,5 +922,74 @@ mod tests {
         };
         assert!(out.output.is_some());
         assert_eq!(out.output.unwrap(), expected);
+    }
+
+    #[test]
+    fn parse_fn_metadata() {
+        let program_text = r#"@metadata {
+		    Is: [Public]
+		    Uses: [ReadFile, WriteFile]
+	    }"#;
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        println!("{:#?}", lexer.token_stream);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_function_metadata();
+        println!("{:#?}", out);
+        // Check
+        let expected_properties: Vec<FunctionProperties> = vec![FunctionProperties::Public];
+        let expected_permissions: Vec<FunctionPermissions> = vec![
+            FunctionPermissions::ReadFile,
+            FunctionPermissions::WriteFile,
+        ];
+        assert!(out.output.is_some());
+        let (perms, props) = out.output.unwrap();
+        assert_eq!(expected_permissions, props);
+        assert_eq!(expected_properties, perms);
+    }
+
+    #[test]
+    fn parse_fn_contracts() {
+        let program_text = r#"@contracts {
+		    In: (a > 0, "a must be greater than 0")
+		    Out: (result > 0, "output must be greater than 0")
+	    }"#;
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        let symbols = lexer
+            .token_stream
+            .iter()
+            .map(|t| t.symbol.clone())
+            .collect::<Vec<Symbol>>();
+        println!("{:?}", symbols);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_function_contracts();
+        println!("{:#?}", out);
+        assert!(out.output.is_some());
+        // Check
+        let expected_in: FunctionContract = FunctionContract {
+            type_: ContractType::Input,
+            condition: Expr::BinaryOp {
+                left: Box::new(Expr::Variable("a".to_string())),
+                operator: BinaryOperator::GreaterThan,
+                right: Box::new(Expr::IntegerLiteral(0)),
+            },
+            message: "a must be greater than 0".to_string(),
+        };
+        let expected_out: FunctionContract = FunctionContract {
+            type_: ContractType::Output,
+            condition: Expr::BinaryOp {
+                left: Box::new(Expr::Variable("result".to_string())),
+                operator: BinaryOperator::GreaterThan,
+                right: Box::new(Expr::IntegerLiteral(0)),
+            },
+            message: "output must be greater than 0".to_string(),
+        };
+        let expected: Vec<FunctionContract> = vec![expected_in, expected_out];
+        assert_eq!(expected, out.output.unwrap());
     }
 }

@@ -65,15 +65,15 @@ pub enum Expr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
-    Add,        // +
-    Subtract,   // -
-    Multiply,   // *
-    Divide,     // /
-    Modulo,     // %
-    LeftAngle,  // <
-    RightAngle, // >
-    And,        // and
-    Or,         // or
+    Add,         // +
+    Subtract,    // -
+    Multiply,    // *
+    Divide,      // /
+    Modulo,      // %
+    LessThan,    // <
+    GreaterThan, // >
+    And,         // and
+    Or,          // or
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,6 +151,10 @@ impl Parser {
             Symbol::Float(f) => {
                 self.consume();
                 ParserOutput::okay(Expr::FloatLiteral(*f))
+            }
+            Symbol::StringLiteral(s) => {
+                self.consume();
+                ParserOutput::okay(Expr::StringLiteral(s.clone()))
             }
             Symbol::ParenOpen => {
                 self.consume();
@@ -286,8 +290,8 @@ impl Parser {
             Symbol::Times => ParserOutput::okay(BinaryOperator::Multiply),
             Symbol::Divide => ParserOutput::okay(BinaryOperator::Divide),
             Symbol::Modulo => ParserOutput::okay(BinaryOperator::Modulo),
-            Symbol::LeftAngle => ParserOutput::okay(BinaryOperator::LeftAngle),
-            Symbol::RightAngle => ParserOutput::okay(BinaryOperator::RightAngle),
+            Symbol::LeftAngle => ParserOutput::okay(BinaryOperator::LessThan),
+            Symbol::RightAngle => ParserOutput::okay(BinaryOperator::GreaterThan),
             Symbol::And => ParserOutput::okay(BinaryOperator::And),
             Symbol::Or => ParserOutput::okay(BinaryOperator::Or),
             _ => self.single_error("Expected binary operator"),
@@ -321,7 +325,7 @@ mod tests {
     use crate::lexer::Lexer;
 
     #[test]
-    fn test_expr_1() {
+    fn expr_1() {
         let program_text = "5";
         // Lex
         let mut lexer = Lexer::new("test");
@@ -334,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expr_2() {
+    fn expr_2() {
         let program_text = "5.39";
         // Lex
         let mut lexer = Lexer::new("test");
@@ -347,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expr_3() {
+    fn expr_3() {
         let program_text = "-5";
         // Lex
         let mut lexer = Lexer::new("test");
@@ -365,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expr_4() {
+    fn expr_4() {
         let program_text = "2+5";
         // Lex
         let mut lexer = Lexer::new("test");
@@ -384,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expr_5() {
+    fn expr_5() {
         let program_text = "2 + 5";
         // Lex
         let mut lexer = Lexer::new("test");
@@ -403,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expr_6() {
+    fn expr_6() {
         let program_text = "add(2, 5)";
         // Lex
         let mut lexer = Lexer::new("test");
@@ -421,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expr_7() {
+    fn expr_7() {
         let program_text = "add(2, 5 * a)";
         // Lex
         let mut lexer = Lexer::new("test");
