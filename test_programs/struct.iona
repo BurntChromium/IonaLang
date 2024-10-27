@@ -4,7 +4,7 @@ struct Animal {
 	feathers: Bool
 	
 	@metadata {
-		Is: [Public]
-		Derives: [Eq, Show]
+		Is: Public;
+		Derives: Eq, Show;
 	}
 }

@@ -1,34 +1,29 @@
-// source: ./stdlib/core.iona
+// source: ./test_programs/comprehensive.iona
 
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum {
-	SOME,
-	NONE,
-} MaybeStates;
+#include "math"
 
-typedef union {
-	void* Some;
-} MaybeValues;
-
-struct Maybe {
-	MaybeStates tag;
-	MaybeValues data;
+struct Animal {
+	int_fast64_t legs;
+	bool hair;
+	bool feathers;
 };
 
 typedef enum {
-	OKAY,
-	ERROR,
-} ResultStates;
+	DOG,
+	FISH,
+	BIRD,
+	CAT,
+} PetsStates;
 
 typedef union {
-	void* Okay;
-	void* Error;
-} ResultValues;
+	int_fast64_t Cat;
+} PetsValues;
 
-struct Result {
-	ResultStates tag;
-	ResultValues data;
+struct Pets {
+	PetsStates tag;
+	PetsValues data;
 };
 

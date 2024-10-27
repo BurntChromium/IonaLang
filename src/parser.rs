@@ -233,7 +233,6 @@ impl Parser {
             "Int" => ParserOutput::okay(Type::Integer),
             "Str" => ParserOutput::okay(Type::String),
             "Bool" => ParserOutput::okay(Type::Boolean),
-
             _ => ParserOutput::okay(Type::Custom(name)),
         })
     }
@@ -295,9 +294,8 @@ impl Parser {
     {
         self.then_ignore(expected_symbol)
             .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::Colon)))
-            .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BracketOpen)))
             .and_then(|_| self.parse_list_comma_separated(|p| parse_item(p)))
-            .and_then(|values| self.then_ignore(Symbol::BracketClose).map(|_| values))
+            .and_then(|values| self.then_ignore(Symbol::Semicolon).map(|_| values))
     }
 
     fn parse_metadata_data_types(
@@ -927,8 +925,8 @@ mod tests {
     #[test]
     fn parse_fn_metadata() {
         let program_text = r#"@metadata {
-		    Is: [Public]
-		    Uses: [ReadFile, WriteFile]
+		    Is: Public;
+		    Uses: ReadFile, WriteFile;
 	    }"#;
         // Lex
         let mut lexer = Lexer::new("test");

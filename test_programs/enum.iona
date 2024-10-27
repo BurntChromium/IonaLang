@@ -5,7 +5,7 @@ enum Pets {
 	Cat: Int,
 	
 	@metadata {
-		Is: [Public]
-		Derives: [Eq, Show]
+		Is: Public;
+		Derives: Eq, Show;
 	}
 }
