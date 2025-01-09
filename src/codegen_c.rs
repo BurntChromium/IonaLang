@@ -31,7 +31,8 @@ fn write_struct(input: &Struct) -> String {
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
             Type::Generic(_) => buffer.push_str("\tvoid*"),
-            Type::Void => panic!("A struct cannot have type Void. This error indicates that there is a compiler issue, it should have been caught before code generation.") // this should not be possible
+            Type::Void => panic!("A struct cannot have type Void. This error indicates that there is a compiler issue, it should have been caught before code generation."), // this should not be possible
+            _ => todo!()
         }
         buffer.push_str(&format!(" {};\n", field.name));
     }
@@ -61,6 +62,7 @@ fn write_enum(input: &Enum) -> String {
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Generic(_) => buffer.push_str("\tvoid*"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
+            _ => todo!()
         }
         buffer.push_str(&format!(" {};\n", field.name));
     }

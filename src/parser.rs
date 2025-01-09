@@ -104,6 +104,9 @@ pub enum Type {
     Integer,
     String,
     Boolean,
+    Array(Box<Type>),
+    Map(Box<Type>),
+    Shared(Box<Type>),
     Generic(String),
     Custom(String),
 }
@@ -481,6 +484,28 @@ pub struct FunctionContract {
     type_: ContractType,
     condition: Expr,
     message: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Branch {
+    condition: Option<Expr>, // None is the catch all case (`_` in a match or `else` in a ternary)
+    computation: Vec<Statement>
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Statement {
+    FunctionCall(Expr),
+    VariableDeclaration {
+        name: String,
+        type_: Type,
+        value: Expr
+    },
+    VariableMutation {
+        name: String,
+        value: Expr
+    },
+    Conditional(Vec<Branch>),
+    Return(Expr)
 }
 
 impl Parser {
