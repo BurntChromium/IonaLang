@@ -62,7 +62,7 @@ fn write_enum(input: &Enum) -> String {
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Generic(_) => buffer.push_str("\tvoid*"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
-            _ => todo!()
+            _ => todo!(),
         }
         buffer.push_str(&format!(" {};\n", field.name));
     }

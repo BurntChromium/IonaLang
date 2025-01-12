@@ -54,6 +54,15 @@ pub enum Symbol {
     Modulo,
     Space,
     NewLine,
+    Underscore,
+    Let,
+    If,
+    Elif,
+    Else,
+    Match,
+    Return,
+    Equals,
+    FatArrow,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -207,6 +216,20 @@ impl Lexer {
                     self.simple_add(Symbol::Modulo, 1);
                     chars.next();
                 }
+                '_' => {
+                    self.simple_add(Symbol::Underscore, 1);
+                    chars.next();
+                }
+                '=' => {
+                    // Check for fat arrow ('=>')
+                    chars.next();
+                    if chars.peek() == Some(&'>') {
+                        self.simple_add(Symbol::FatArrow, 2);
+                        chars.next();
+                    } else {
+                        self.simple_add(Symbol::Equals, 1);
+                    }
+                }
                 c if c.is_whitespace() => {
                     println!("some other space? {}", c);
                     self.simple_add(Symbol::Space, c.len_utf8());
@@ -238,6 +261,12 @@ impl Lexer {
                         "Derives" => self.simple_add(Symbol::Traits, word_len),
                         "Uses" => self.simple_add(Symbol::Permissions, word_len),
                         "Generic" => self.simple_add(Symbol::Generic, word_len),
+                        "let" => self.simple_add(Symbol::Let, word_len),
+                        "if" => self.simple_add(Symbol::If, word_len),
+                        "match" => self.simple_add(Symbol::Match, word_len),
+                        "return" => self.simple_add(Symbol::Return, word_len),
+                        "elif" => self.simple_add(Symbol::Elif, word_len),
+                        "else" => self.simple_add(Symbol::Else, word_len),
                         _ => self.simple_add(Symbol::Identifier(word), word_len),
                     }
                 }
@@ -457,6 +486,25 @@ mod tests {
                 Symbol::Space,
                 Symbol::Float(3.4),
                 Symbol::ParenClose,
+                Symbol::NewLine
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_underscores() {
+        let input = "variable_name";
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&input);
+        let symbols = lexer
+            .token_stream
+            .iter()
+            .map(|t| t.symbol.clone())
+            .collect::<Vec<Symbol>>();
+        assert_eq!(
+            symbols,
+            vec![
+                Symbol::Identifier("variable_name".to_string()),
                 Symbol::NewLine
             ]
         );

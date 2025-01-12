@@ -489,7 +489,7 @@ pub struct FunctionContract {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Branch {
     condition: Option<Expr>, // None is the catch all case (`_` in a match or `else` in a ternary)
-    computation: Vec<Statement>
+    computation: Vec<Statement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -498,14 +498,14 @@ pub enum Statement {
     VariableDeclaration {
         name: String,
         type_: Type,
-        value: Expr
+        value: Expr,
     },
     VariableMutation {
         name: String,
-        value: Expr
+        value: Expr,
     },
     Conditional(Vec<Branch>),
-    Return(Expr)
+    Return(Expr),
 }
 
 impl Parser {
@@ -717,6 +717,284 @@ impl Parser {
                 }
             })
             .and_then(|contracts| self.then_ignore(Symbol::BraceClose).map(|_| contracts))
+    }
+
+    fn parse_statement(&mut self) -> ParserOutput<Statement> {
+        self.skip_whitespace();
+        match &self.peek().symbol {
+            Symbol::Let => self.parse_variable_declaration(),
+            Symbol::If => self.parse_conditional(),
+            Symbol::Match => self.parse_match(),
+            Symbol::Return => self.parse_return(),
+            Symbol::Identifier(_) => {
+                // Could be function call or assignment
+                let expr = self.parse_expr(0);
+                if expr.output.is_none() {
+                    return expr.transmute_error();
+                }
+
+                self.skip_whitespace();
+                match &self.peek().symbol {
+                    Symbol::Equals => {
+                        // It's an assignment
+                        self.consume(); // consume =
+                        self.skip_whitespace();
+                        let value = self.parse_expr(0);
+                        if value.output.is_none() {
+                            return value.transmute_error();
+                        }
+                        self.then_ignore(Symbol::Semicolon)
+                            .map(|_| Statement::VariableMutation {
+                                name: match &expr.output.unwrap() {
+                                    Expr::Variable(name) => name.clone(),
+                                    _ => panic!("Invalid assignment target"),
+                                },
+                                value: value.output.unwrap(),
+                            })
+                    }
+                    Symbol::Semicolon => {
+                        // It's a function call
+                        self.consume(); // consume ;
+                        ParserOutput::okay(Statement::FunctionCall(expr.output.unwrap()))
+                    }
+                    _ => self.single_error("Expected = or ; after expression"),
+                }
+            }
+            _ => self.single_error("Expected statement"),
+        }
+    }
+
+    fn parse_variable_declaration(&mut self) -> ParserOutput<Statement> {
+        self.consume(); // consume let
+        self.skip_whitespace();
+
+        // Parse name
+        let name = match &self.peek().symbol {
+            Symbol::Identifier(id) => id.clone(),
+            _ => return self.single_error("Expected identifier after let"),
+        };
+        self.consume();
+
+        // Parse type annotation
+        self.skip_whitespace();
+        self.then_ignore(Symbol::Colon)
+            .and_then(|_| {
+                self.skip_whitespace();
+                self.parse_type()
+            })
+            .and_then(|type_| {
+                // Parse initializer
+                self.skip_whitespace();
+                self.then_ignore(Symbol::Equals)
+                    .and_then(|_| {
+                        self.skip_whitespace();
+                        self.parse_expr(0)
+                    })
+                    .and_then(|value| {
+                        self.then_ignore(Symbol::Semicolon)
+                            .map(|_| Statement::VariableDeclaration { name, type_, value })
+                    })
+            })
+    }
+
+    fn parse_conditional(&mut self) -> ParserOutput<Statement> {
+        let mut branches = Vec::new();
+        let mut diagnostics = Vec::new();
+
+        // Parse if branch
+        self.consume(); // consume if
+        self.skip_whitespace();
+
+        let condition = self.parse_expr(0);
+        if condition.output.is_none() {
+            return condition.transmute_error();
+        }
+
+        self.skip_whitespace();
+        let block_result = self.parse_block();
+        if block_result.output.is_none() {
+            return block_result.transmute_error();
+        }
+
+        branches.push(Branch {
+            condition: Some(condition.output.unwrap()),
+            computation: block_result.output.unwrap(),
+        });
+
+        // Parse elif branches
+        loop {
+            self.skip_whitespace();
+            if self.peek().symbol != Symbol::Elif {
+                break;
+            }
+
+            self.consume(); // consume elif
+            self.skip_whitespace();
+
+            let elif_condition = self.parse_expr(0);
+            if elif_condition.output.is_none() {
+                diagnostics.extend(elif_condition.diagnostics);
+                break;
+            }
+
+            self.skip_whitespace();
+            let elif_block = self.parse_block();
+            if elif_block.output.is_none() {
+                diagnostics.extend(elif_block.diagnostics);
+                break;
+            }
+
+            branches.push(Branch {
+                condition: Some(elif_condition.output.unwrap()),
+                computation: elif_block.output.unwrap(),
+            });
+        }
+
+        // Parse optional else branch
+        self.skip_whitespace();
+        if self.peek().symbol == Symbol::Else {
+            self.consume();
+            self.skip_whitespace();
+
+            let else_block = self.parse_block();
+            if else_block.output.is_none() {
+                diagnostics.extend(else_block.diagnostics);
+                return ParserOutput::err(diagnostics);
+            }
+
+            branches.push(Branch {
+                condition: None,
+                computation: else_block.output.unwrap(),
+            });
+        }
+
+        if !diagnostics.is_empty() {
+            ParserOutput::err(diagnostics)
+        } else {
+            ParserOutput::okay(Statement::Conditional(branches))
+        }
+    }
+
+    fn parse_match(&mut self) -> ParserOutput<Statement> {
+        self.consume(); // consume match
+        self.skip_whitespace();
+
+        let match_expr = self.parse_expr(0);
+        if match_expr.output.is_none() {
+            return match_expr.transmute_error();
+        }
+
+        self.skip_whitespace();
+        let brace_result = self.then_ignore(Symbol::BraceOpen);
+        if brace_result.output.is_none() {
+            return brace_result.transmute_error();
+        }
+
+        let mut branches = Vec::new();
+        let mut diagnostics = Vec::new();
+
+        loop {
+            self.skip_whitespace();
+            if self.peek().symbol == Symbol::BraceClose {
+                self.consume();
+                break;
+            }
+
+            // Parse match pattern
+            let condition = if self.peek().symbol == Symbol::Underscore {
+                self.consume();
+                None
+            } else {
+                let expr = self.parse_expr(0);
+                if expr.output.is_none() {
+                    diagnostics.extend(expr.diagnostics);
+                    break;
+                }
+                Some(expr.output.unwrap())
+            };
+
+            self.skip_whitespace();
+            let arrow_result = self.then_ignore(Symbol::FatArrow);
+            if arrow_result.output.is_none() {
+                diagnostics.extend(arrow_result.diagnostics);
+                break;
+            }
+
+            self.skip_whitespace();
+            let computation = if self.peek().symbol == Symbol::BraceOpen {
+                let block_result = self.parse_block();
+                if block_result.output.is_none() {
+                    diagnostics.extend(block_result.diagnostics);
+                    break;
+                }
+                block_result.output.unwrap()
+            } else {
+                let expr = self.parse_expr(0);
+                if expr.output.is_none() {
+                    diagnostics.extend(expr.diagnostics);
+                    break;
+                }
+
+                let semi_result = self.then_ignore(Symbol::Semicolon);
+                if semi_result.output.is_none() {
+                    diagnostics.extend(semi_result.diagnostics);
+                    break;
+                }
+
+                vec![Statement::Return(expr.output.unwrap())]
+            };
+
+            branches.push(Branch {
+                condition,
+                computation,
+            });
+        }
+
+        if !diagnostics.is_empty() {
+            ParserOutput::err(diagnostics)
+        } else {
+            ParserOutput::okay(Statement::Conditional(branches))
+        }
+    }
+
+    fn parse_return(&mut self) -> ParserOutput<Statement> {
+        self.consume(); // consume return
+        self.skip_whitespace();
+
+        let expr = self.parse_expr(0);
+        if expr.output.is_none() {
+            return expr.transmute_error();
+        }
+
+        self.then_ignore(Symbol::Semicolon)
+            .map(|_| Statement::Return(expr.output.unwrap()))
+    }
+
+    fn parse_block(&mut self) -> ParserOutput<Vec<Statement>> {
+        self.skip_whitespace();
+        self.then_ignore(Symbol::BraceOpen).and_then(|_| {
+            let mut statements = Vec::new();
+            let mut diagnostics = Vec::new();
+
+            loop {
+                self.skip_whitespace();
+                if self.peek().symbol == Symbol::BraceClose {
+                    self.consume();
+                    break;
+                }
+
+                let stmt = self.parse_statement();
+                if let Some(s) = stmt.output {
+                    statements.push(s);
+                }
+                diagnostics.extend(stmt.diagnostics);
+            }
+
+            ParserOutput {
+                output: Some(statements),
+                diagnostics,
+            }
+        })
     }
 }
 
@@ -1014,5 +1292,98 @@ mod tests {
         };
         let expected: Vec<FunctionContract> = vec![expected_in, expected_out];
         assert_eq!(expected, out.output.unwrap());
+    }
+
+    #[test]
+    fn parse_variable_declaration() {
+        let program = "let x: Int = 42;";
+        let mut lexer = Lexer::new("test");
+        lexer.lex(program);
+        let mut parser = Parser::new(lexer.token_stream);
+
+        let result = parser.parse_statement();
+        assert!(result.output.is_some());
+
+        match result.output.unwrap() {
+            Statement::VariableDeclaration { name, type_, value } => {
+                assert_eq!(name, "x");
+                assert_eq!(type_, Type::Integer);
+                assert_eq!(value, Expr::IntegerLiteral(42));
+            }
+            _ => panic!("Expected VariableDeclaration"),
+        }
+    }
+
+    #[test]
+    fn parse_conditional() {
+        let program = r#"if x > 5 {
+            return 10;
+        } elif x < 0 {
+            return 0;
+        } else {
+            return 5;
+        }"#;
+
+        let mut lexer = Lexer::new("test");
+        lexer.lex(program);
+        let mut parser = Parser::new(lexer.token_stream);
+
+        let result = parser.parse_statement();
+        assert!(result.output.is_some());
+
+        match result.output.unwrap() {
+            Statement::Conditional(branches) => {
+                assert_eq!(branches.len(), 3);
+
+                // Check if branch
+                assert!(branches[0].condition.is_some());
+                assert_eq!(branches[0].computation.len(), 1);
+
+                // Check elif branch
+                assert!(branches[1].condition.is_some());
+                assert_eq!(branches[1].computation.len(), 1);
+
+                // Check else branch
+                assert!(branches[2].condition.is_none());
+                assert_eq!(branches[2].computation.len(), 1);
+            }
+            _ => panic!("Expected Conditional"),
+        }
+    }
+
+    #[test]
+    fn parse_match() {
+        let program = r#"match x {
+            0 => 42;
+            1 => { return 43; }
+            _ => 44;
+        }"#;
+
+        let mut lexer = Lexer::new("test");
+        lexer.lex(program);
+        let mut parser = Parser::new(lexer.token_stream);
+
+        let result = parser.parse_statement();
+        println!("{:#?}", result.diagnostics);
+        assert!(result.output.is_some());
+
+        match result.output.unwrap() {
+            Statement::Conditional(branches) => {
+                assert_eq!(branches.len(), 3);
+
+                // Check literal match
+                assert_eq!(branches[0].condition, Some(Expr::IntegerLiteral(0)));
+                assert_eq!(branches[0].computation.len(), 1);
+
+                // Check block match
+                assert_eq!(branches[1].condition, Some(Expr::IntegerLiteral(1)));
+                assert_eq!(branches[1].computation.len(), 1);
+
+                // Check catch-all
+                assert!(branches[2].condition.is_none());
+                assert_eq!(branches[2].computation.len(), 1);
+            }
+            _ => panic!("Expected Conditional"),
+        }
     }
 }
