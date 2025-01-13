@@ -182,13 +182,15 @@ pub struct Function {
     pub properties: Vec<FunctionProperties>,
     pub permissions: Vec<FunctionPermissions>,
     pub contracts: Vec<FunctionContract>,
+    pub statements: Vec<Statement>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ASTNode {
     StructDeclaration(Struct),
     EnumDeclaration(Enum),
     ImportStatement(Import),
+    FunctionDeclaration(Function),
 }
 
 // -------------------- Parsers --------------------
@@ -970,11 +972,13 @@ impl Parser {
             .map(|_| Statement::Return(expr.output.unwrap()))
     }
 
+    /// A block is a collection of statements wrapped in braces {}
     fn parse_block(&mut self) -> ParserOutput<Vec<Statement>> {
         self.skip_whitespace();
         self.then_ignore(Symbol::BraceOpen).and_then(|_| {
             let mut statements = Vec::new();
             let mut diagnostics = Vec::new();
+            let mut iter_count: usize = 0;
 
             loop {
                 self.skip_whitespace();
@@ -988,6 +992,10 @@ impl Parser {
                     statements.push(s);
                 }
                 diagnostics.extend(stmt.diagnostics);
+                iter_count += 1;
+                if iter_count > 1000 {
+                    break;
+                }
             }
 
             ParserOutput {
@@ -995,6 +1003,143 @@ impl Parser {
                 diagnostics,
             }
         })
+    }
+
+    /// This parses multiple sequential statements until a closing } is found (expected to be the end of a function)
+    ///
+    /// This is functionally the same as the Block but without an open brace (because the open brace should be consumed by the fn declare parser)
+    fn parse_statements_many(&mut self) -> ParserOutput<Vec<Statement>> {
+        self.skip_whitespace();
+        let mut statements = Vec::new();
+        let mut diagnostics = Vec::new();
+        let mut iter_count: usize = 0;
+
+        loop {
+            self.skip_whitespace();
+            if self.peek().symbol == Symbol::BraceClose {
+                self.consume();
+                break;
+            }
+
+            let stmt = self.parse_statement();
+            if let Some(s) = stmt.output {
+                statements.push(s);
+            }
+            diagnostics.extend(stmt.diagnostics);
+            iter_count += 1;
+            if iter_count > 1000 {
+                break;
+            }
+        }
+        ParserOutput {
+            output: Some(statements),
+            diagnostics,
+        }
+    }
+
+    /// Parse an entire function block (declaration, contracts, body, etc.)
+    fn parse_function(&mut self) -> ParserOutput<Function> {
+        let mut diagnostics = Vec::new();
+
+        // Parse the function declaration
+        let declaration = match self.parse_function_declaration() {
+            ParserOutput {
+                output: Some(decl),
+                diagnostics: mut decl_diagnostics,
+            } => {
+                diagnostics.append(&mut decl_diagnostics);
+                Some(decl)
+            }
+            ParserOutput {
+                output: None,
+                diagnostics: mut decl_diagnostics,
+            } => {
+                diagnostics.append(&mut decl_diagnostics);
+                None
+            }
+        };
+
+        // Parse the metadata block
+        let (properties, permissions) = match self.with_whitespace(|p| p.parse_function_metadata())
+        {
+            ParserOutput {
+                output: Some((props, perms)),
+                diagnostics: mut meta_diagnostics,
+            } => {
+                diagnostics.append(&mut meta_diagnostics);
+                (Some(props), Some(perms))
+            }
+            ParserOutput {
+                output: None,
+                diagnostics: mut meta_diagnostics,
+            } => {
+                diagnostics.append(&mut meta_diagnostics);
+                (None, None)
+            }
+        };
+
+        // Parse the contracts block
+        let contracts = match self.with_whitespace(|p| p.parse_function_contracts()) {
+            ParserOutput {
+                output: Some(contracts),
+                diagnostics: mut contract_diagnostics,
+            } => {
+                diagnostics.append(&mut contract_diagnostics);
+                Some(contracts)
+            }
+            ParserOutput {
+                output: None,
+                diagnostics: mut contract_diagnostics,
+            } => {
+                diagnostics.append(&mut contract_diagnostics);
+                None
+            }
+        };
+
+        // Parse the function body
+        let statements = match self.with_whitespace(|p| p.parse_statements_many()) {
+            ParserOutput {
+                output: Some(statements),
+                diagnostics: mut block_diagnostics,
+            } => {
+                diagnostics.append(&mut block_diagnostics);
+                Some(statements)
+            }
+            ParserOutput {
+                output: None,
+                diagnostics: mut block_diagnostics,
+            } => {
+                diagnostics.append(&mut block_diagnostics);
+                None
+            }
+        };
+
+        // If any of the components failed, return all diagnostics
+        if declaration.is_none()
+            || properties.is_none()
+            || permissions.is_none()
+            || contracts.is_none()
+            || statements.is_none()
+        {
+            return ParserOutput::err(diagnostics);
+        }
+
+        // Construct the Function struct
+        let declaration_inner = declaration.unwrap();
+        let function = Function {
+            name: declaration_inner.name,
+            args: declaration_inner.parameters,
+            returns: declaration_inner.return_type,
+            properties: properties.unwrap(),
+            permissions: permissions.unwrap(),
+            contracts: contracts.unwrap(),
+            statements: statements.unwrap(),
+        };
+
+        ParserOutput {
+            output: Some(function),
+            diagnostics,
+        }
     }
 }
 
@@ -1385,5 +1530,47 @@ mod tests {
             }
             _ => panic!("Expected Conditional"),
         }
+    }
+
+    #[test]
+    fn parse_valid_function() {
+        let program = r#"fn foo(a: Int, b: Int) -> Int {
+                @metadata {
+                    Is: Public;
+                    Uses: ReadFile, WriteFile;
+                }
+
+                @contracts {
+                    In: (a > 0, "a must be greater than 0")
+                    In: (b > 2, "b must be greater than 2")
+                    Out: (result > 0, "output must be greater than 0")
+                }
+
+                let x: Shared = add(a, 5);
+                let y: Auto = minus(x, 2);
+                x = -3;
+                return x;
+            }
+        "#;
+        let mut lexer = Lexer::new("test");
+        lexer.lex(program);
+        let mut parser = Parser::new(lexer.token_stream);
+
+        let result = parser.parse_function();
+        println!("{:#?}", result.diagnostics);
+        assert!(result.output.is_some());
+        assert!(
+            result.diagnostics.is_empty(),
+            "Expected no diagnostics, but found: {:?}",
+            result.diagnostics
+        );
+        let function = result.output.unwrap();
+        assert_eq!(function.name, "foo");
+        assert_eq!(function.args.len(), 2);
+        assert_eq!(function.returns, Type::Integer); // Assuming Type::Int exists.
+        assert_eq!(function.properties.len(), 1);
+        assert_eq!(function.permissions.len(), 2);
+        assert_eq!(function.contracts.len(), 3);
+        assert_eq!(function.statements.len(), 4);
     }
 }

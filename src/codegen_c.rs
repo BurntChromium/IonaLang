@@ -95,6 +95,7 @@ where
                 buffer.push_str(&write_import(i));
                 buffer.push_str("\n\n");
             }
+            _ => {}
         }
     }
     buffer

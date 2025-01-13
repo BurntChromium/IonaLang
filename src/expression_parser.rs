@@ -63,7 +63,7 @@ pub enum Expr {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryOperator {
     Add,         // +
     Subtract,    // -
@@ -76,7 +76,7 @@ pub enum BinaryOperator {
     Or,          // or
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnaryOperator {
     Negate, // -
 }
