@@ -21,7 +21,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         &args[1]
     };
     let t_start = Instant::now();
-    let ast = pipeline::file_to_ast(&file)?;
+    let maybe_ast = pipeline::file_to_ast(&file);
+    if let Err(e) = maybe_ast {
+        eprint!("{}", e);
+        std::process::exit(1);
+    }
+    let ast = maybe_ast.unwrap();
     println!("{:#?}", ast);
     let generated_code = codegen_c::write_all(file, ast.iter());
     fs::write("gen/test_case.c", generated_code).expect("Unable to write file");

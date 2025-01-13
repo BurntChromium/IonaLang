@@ -208,6 +208,10 @@ impl Parser {
             Symbol::Struct => self.parse_struct().map(ASTNode::StructDeclaration),
             Symbol::Enum => self.parse_enum().map(ASTNode::EnumDeclaration),
             Symbol::Import => self.parse_import().map(ASTNode::ImportStatement),
+            Symbol::Function => {
+                let item = self.parse_function().map(ASTNode::FunctionDeclaration);
+                return item;
+            }
             _ => {
                 let message = format!(
                     "expected a keyword such as 'fn', 'struct', or 'import', but found {:?}",
@@ -1027,7 +1031,7 @@ impl Parser {
             }
             diagnostics.extend(stmt.diagnostics);
             iter_count += 1;
-            if iter_count > 1000 {
+            if !diagnostics.is_empty() && iter_count > 5 {
                 break;
             }
         }

@@ -72,6 +72,7 @@ fn create_rich_diagnostic_message(position: &SourcePosition, input: &str, messag
         buffer.push_str(line);
         buffer.push('\n'); // Add a newline after the line
     }
+    buffer.push('\n');
 
     buffer
 }

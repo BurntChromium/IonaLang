@@ -20,7 +20,7 @@ pub fn file_to_ast(filepath: &str) -> Result<Vec<ASTNode>, Box<dyn Error>> {
     // Parse the file
     let mut parser = Parser::new(lexer.token_stream);
     let out = parser.parse_all();
-    if out.output == None {
+    if !out.diagnostics.is_empty() {
         let message_buffer = out
             .diagnostics
             .iter()

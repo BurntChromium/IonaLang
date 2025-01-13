@@ -1,4 +1,8 @@
 //! Generate C Code
+//!
+//! Note: we don't lift the type writing into a function because it's somewhat context dependent (ex. strings cannot have Void types but Enums can)
+
+use std::borrow::Cow;
 
 use crate::parser::*;
 
@@ -75,6 +79,33 @@ fn write_enum(input: &Enum) -> String {
     buffer
 }
 
+// -------------------- Functions --------------------
+
+fn write_fn_type(input: &Type) -> Cow<'static, str> {
+    match input {
+        Type::String => Cow::Borrowed("\tchar"),
+        Type::Integer => Cow::Borrowed("\tint_fast64_t"),
+        Type::Boolean => Cow::Borrowed("\tbool"),
+        Type::Custom(name) => Cow::Owned(format!("\t {}", name)),
+        Type::Generic(_) => Cow::Borrowed("\tvoid*"),
+        Type::Void => Cow::Borrowed("\tvoid"),
+        _ => todo!(),
+    }
+}
+
+fn write_fn_declare(input: &Function) -> String {
+    let mut buffer: String = format!("{} {}(", write_fn_type(&input.returns), input.name);
+    for arg in &input.args {
+        buffer += &format!("{} {}, ", write_fn_type(&arg.field_type), arg.name);
+    }
+    // Remove the trailing `, `
+    buffer.pop();
+    buffer.pop();
+    buffer.push(')');
+    buffer.push(';');
+    buffer
+}
+
 /// Write an AST to a string
 pub fn write_all<'ast, I>(filename: &str, ast: I) -> String
 where
@@ -95,7 +126,9 @@ where
                 buffer.push_str(&write_import(i));
                 buffer.push_str("\n\n");
             }
-            _ => {}
+            ASTNode::FunctionDeclaration(f) => {
+                buffer.push_str(&write_fn_declare(f));
+            }
         }
     }
     buffer

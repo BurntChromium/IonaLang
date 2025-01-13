@@ -1,5 +1,3 @@
-import math with pow, sqrt, Group, Ring;
-
 struct Animal {
 	legs: Int,
 	hair: Bool,
@@ -20,5 +18,14 @@ enum Pets {
 	@metadata {
 		Is: Public;
 		Derives: Eq, Show;
+	}
+}
+
+fn print_pet(pet: Pet) {
+	match pet {
+		Dog => print("dog"),
+		Fish => print("fish"),
+		Bird => print("bird"),
+		Cat => print("cat")
 	}
 }
