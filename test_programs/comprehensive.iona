@@ -21,7 +21,7 @@ enum Pets {
 	}
 }
 
-fn print_pet(pet: Pet) {
+fn print_pet(pet: Pets) -> Void {
 	match pet {
 		Dog => print("dog"),
 		Fish => print("fish"),

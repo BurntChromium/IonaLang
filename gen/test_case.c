@@ -8,6 +8,7 @@ struct Animal {
 	bool hair;
 	bool feathers;
 };
+typedef struct Animal Animal;
 
 typedef enum {
 	DOG,
@@ -24,4 +25,6 @@ struct Pets {
 	PetsStates tag;
 	PetsValues data;
 };
+typedef struct Pets Pets;
 
+void print_pet(Pets pet);

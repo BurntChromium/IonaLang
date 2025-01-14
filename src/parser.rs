@@ -10,6 +10,7 @@ pub struct Parser {
     tokens: Vec<Token>,
     offset: usize,
     pub recursion_counter: usize,
+    pub trace: Vec<String>, // queue of parsing fn calls to debug state
 }
 
 /// Golang-esque error handling to allow multiple returns
@@ -199,10 +200,12 @@ pub enum ASTNode {
 
 impl Parser {
     pub fn parse_all(&mut self) -> ParserOutput<Vec<ASTNode>> {
+        self.add_trace("parse all");
         self.parse_list_newline_separated(|p| p.parse_top_level_declaration())
     }
 
     fn parse_top_level_declaration(&mut self) -> ParserOutput<ASTNode> {
+        self.add_trace("parse top level declaration (statement)");
         self.skip_whitespace();
         match self.peek().symbol {
             Symbol::Struct => self.parse_struct().map(ASTNode::StructDeclaration),
@@ -214,7 +217,7 @@ impl Parser {
             }
             _ => {
                 let message = format!(
-                    "expected a keyword such as 'fn', 'struct', or 'import', but found {:?}",
+                    "error in top level declaration. Expected a keyword such as 'fn', 'struct', 'enum', or 'import', but found {:?}",
                     self.peek().symbol
                 );
                 self.single_error(&message)
@@ -227,6 +230,7 @@ impl Parser {
 
 impl Parser {
     fn parse_type(&mut self) -> ParserOutput<Type> {
+        self.add_trace("parse type");
         // Handle generics
         if self.peek().symbol == Symbol::Generic {
             self.then_ignore(Symbol::Generic);
@@ -242,6 +246,7 @@ impl Parser {
             "Int" => ParserOutput::okay(Type::Integer),
             "Str" => ParserOutput::okay(Type::String),
             "Bool" => ParserOutput::okay(Type::Boolean),
+            "Void" => ParserOutput::okay(Type::Void),
             _ => ParserOutput::okay(Type::Custom(name)),
         })
     }
@@ -251,6 +256,7 @@ impl Parser {
 
 impl Parser {
     fn parse_import(&mut self) -> ParserOutput<Import> {
+        self.add_trace("parse import");
         self.then_ignore(Symbol::Import)
             .and_then(|_| self.with_whitespace(|p| p.then_identifier()))
             .and_then(|file| {
@@ -272,6 +278,7 @@ impl Parser {
 
 impl Parser {
     fn parse_data_properties(&mut self) -> ParserOutput<DataProperties> {
+        self.add_trace("parse data properties");
         self.then_identifier().and_then(|name| match name.as_str() {
             "Public" => ParserOutput::okay(DataProperties::Public),
             "Export" => ParserOutput::okay(DataProperties::Export),
@@ -283,6 +290,7 @@ impl Parser {
     }
 
     fn parse_data_traits(&mut self) -> ParserOutput<DataTraits> {
+        self.add_trace("parse data traits");
         self.then_identifier().and_then(|name| match name.as_str() {
             "Eq" => ParserOutput::okay(DataTraits::Eq),
             "Show" => ParserOutput::okay(DataTraits::Show),
@@ -301,6 +309,7 @@ impl Parser {
     where
         F: Fn(&mut Self) -> ParserOutput<T>,
     {
+        self.add_trace("parse metadata list (list of traits/props)");
         self.then_ignore(expected_symbol)
             .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::Colon)))
             .and_then(|_| self.parse_list_comma_separated(|p| parse_item(p)))
@@ -310,6 +319,7 @@ impl Parser {
     fn parse_metadata_data_types(
         &mut self,
     ) -> ParserOutput<(Vec<DataProperties>, Vec<DataTraits>)> {
+        self.add_trace("parse metadata types");
         self.then_ignore(Symbol::Tag)
             .and_then(|_| self.then_ignore(Symbol::Metadata))
             .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen)))
@@ -337,7 +347,7 @@ impl Parser {
                         Symbol::BraceClose => break,
                         _ => {
                             diagnostics.push(Diagnostic::new_error_simple(
-                                "Unexpected token in metadata",
+                                "Unexpected token when parsing function metadata (props and traits/derives)",
                                 &self.peek().pos,
                             ));
                             self.consume(); // Skip the unexpected token
@@ -358,6 +368,7 @@ impl Parser {
 
 impl Parser {
     fn parse_struct_declaration(&mut self) -> ParserOutput<String> {
+        self.add_trace("parse struct declaration");
         self.then_ignore(Symbol::Struct)
             .and_then(|_| self.with_whitespace(|p| p.then_identifier()))
             .and_then(|name| {
@@ -366,6 +377,7 @@ impl Parser {
     }
 
     fn parse_field_mandatory_type(&mut self) -> ParserOutput<Field> {
+        self.add_trace("parse a field that has a mandatory type");
         self.then_identifier().and_then(|name| {
             self.with_whitespace(|p| p.then_ignore(Symbol::Colon))
                 .and_then(|_| self.with_whitespace(|p| p.parse_type()))
@@ -377,6 +389,7 @@ impl Parser {
     }
 
     pub fn parse_struct(&mut self) -> ParserOutput<Struct> {
+        self.add_trace("parse struct");
         let name = self.parse_struct_declaration();
         if name.output.is_none() {
             return name.transmute_error::<Struct>();
@@ -407,6 +420,7 @@ impl Parser {
 
 impl Parser {
     fn parse_enum_declaration(&mut self) -> ParserOutput<String> {
+        self.add_trace("parse enum declaration");
         self.then_ignore(Symbol::Enum)
             .and_then(|_| self.with_whitespace(|p| p.then_identifier()))
             .and_then(|name| {
@@ -415,6 +429,7 @@ impl Parser {
     }
 
     fn parse_field_optional_type(&mut self) -> ParserOutput<Field> {
+        self.add_trace("parse enum field optional type");
         self.then_identifier().and_then(|name| {
             self.with_whitespace(|p| {
                 match p.peek().symbol {
@@ -444,6 +459,7 @@ impl Parser {
     }
 
     pub fn parse_enum(&mut self) -> ParserOutput<Enum> {
+        self.add_trace("parse enum");
         let name = self.parse_enum_declaration();
         if name.output.is_none() {
             return name.transmute_error::<Enum>();
@@ -517,6 +533,7 @@ pub enum Statement {
 impl Parser {
     /// Returns (Name, Args, ReturnType)
     fn parse_function_declaration(&mut self) -> ParserOutput<FunctionDeclaration> {
+        self.add_trace("parse function declaration");
         // Parse "fn" keyword and function name
         let fn_and_name = self
             .then_ignore(Symbol::Function)
@@ -549,6 +566,7 @@ impl Parser {
     }
 
     fn parse_fn_properties(&mut self) -> ParserOutput<FunctionProperties> {
+        self.add_trace("parse fn properties");
         self.then_identifier().and_then(|name| match name.as_str() {
             "Public" => ParserOutput::okay(FunctionProperties::Public),
             "Export" => ParserOutput::okay(FunctionProperties::Export),
@@ -560,6 +578,7 @@ impl Parser {
     }
 
     fn parse_fn_permissions(&mut self) -> ParserOutput<FunctionPermissions> {
+        self.add_trace("parse fn permissions");
         self.then_identifier().and_then(|name| match name.as_str() {
             "ReadFile" => ParserOutput::okay(FunctionPermissions::ReadFile),
             "WriteFile" => ParserOutput::okay(FunctionPermissions::WriteFile),
@@ -575,6 +594,15 @@ impl Parser {
     fn parse_function_metadata(
         &mut self,
     ) -> ParserOutput<(Vec<FunctionProperties>, Vec<FunctionPermissions>)> {
+        self.add_trace("parse fn metadata");
+        // These are optional fields, if we don't see a tag then skip this
+        if self.peek().symbol != Symbol::Tag {
+            self.add_trace("skipping fn metadata");
+            return ParserOutput::okay((
+                Vec::<FunctionProperties>::new(),
+                Vec::<FunctionPermissions>::new(),
+            ));
+        }
         self.then_ignore(Symbol::Tag)
             .and_then(|_| self.then_ignore(Symbol::Metadata))
             .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen)))
@@ -620,6 +648,12 @@ impl Parser {
     }
 
     fn parse_function_contracts(&mut self) -> ParserOutput<Vec<FunctionContract>> {
+        self.add_trace("parse fn contracts");
+        // These are optional fields, if we don't see a tag then skip this
+        if self.peek().symbol != Symbol::Tag {
+            self.add_trace("skipping fn contracts");
+            return ParserOutput::okay(Vec::<FunctionContract>::new());
+        }
         self.then_ignore(Symbol::Tag)
             .and_then(|_| self.then_ignore(Symbol::Contracts))
             .and_then(|_| self.with_whitespace(|p| p.then_ignore(Symbol::BraceOpen)))
@@ -676,7 +710,7 @@ impl Parser {
                                 }
                                 _ => {
                                     diagnostics.push(Diagnostic::new_error_simple(
-                                        "Expected string for contract message",
+                                        "Expected a string in a contract for the contract error message",
                                         &self.peek().pos,
                                     ));
                                     self.skip_to_next_newline();
@@ -726,6 +760,7 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> ParserOutput<Statement> {
+        self.add_trace("parse a statement (switch on statement keyword)");
         self.skip_whitespace();
         match &self.peek().symbol {
             Symbol::Let => self.parse_variable_declaration(),
@@ -763,21 +798,26 @@ impl Parser {
                         self.consume(); // consume ;
                         ParserOutput::okay(Statement::FunctionCall(expr.output.unwrap()))
                     }
-                    _ => self.single_error("Expected = or ; after expression"),
+                    _ => self.single_error(
+                        "issue parsing a statement, expected '=' or ';' after an expression",
+                    ),
                 }
             }
-            _ => self.single_error("Expected statement"),
+            _ => self.single_error(
+                "expected a statement keyword ('let', 'if', 'match', 'return', etc.)",
+            ),
         }
     }
 
     fn parse_variable_declaration(&mut self) -> ParserOutput<Statement> {
+        self.add_trace("parse variable declaration");
         self.consume(); // consume let
         self.skip_whitespace();
 
         // Parse name
         let name = match &self.peek().symbol {
             Symbol::Identifier(id) => id.clone(),
-            _ => return self.single_error("Expected identifier after let"),
+            _ => return self.single_error("expected a variable name after the keyword 'let'"),
         };
         self.consume();
 
@@ -804,6 +844,7 @@ impl Parser {
     }
 
     fn parse_conditional(&mut self) -> ParserOutput<Statement> {
+        self.add_trace("parse if/else");
         let mut branches = Vec::new();
         let mut diagnostics = Vec::new();
 
@@ -882,6 +923,7 @@ impl Parser {
     }
 
     fn parse_match(&mut self) -> ParserOutput<Statement> {
+        self.add_trace("parse match statement");
         self.consume(); // consume match
         self.skip_whitespace();
 
@@ -929,6 +971,11 @@ impl Parser {
             self.skip_whitespace();
             let computation = if self.peek().symbol == Symbol::BraceOpen {
                 let block_result = self.parse_block();
+                // Expect a comma, unless it's the last item
+                if self.lookahead().symbol == Symbol::BraceClose {
+                } else {
+                    self.then_ignore(Symbol::Comma);
+                }
                 if block_result.output.is_none() {
                     diagnostics.extend(block_result.diagnostics);
                     break;
@@ -941,7 +988,13 @@ impl Parser {
                     break;
                 }
 
-                let semi_result = self.then_ignore(Symbol::Semicolon);
+                let semi_result: ParserOutput<()>;
+                // Expect a comma, unless it's the last item
+                if self.lookahead().symbol == Symbol::BraceClose {
+                    semi_result = ParserOutput::okay(());
+                } else {
+                    semi_result = self.then_ignore(Symbol::Comma);
+                }
                 if semi_result.output.is_none() {
                     diagnostics.extend(semi_result.diagnostics);
                     break;
@@ -964,6 +1017,7 @@ impl Parser {
     }
 
     fn parse_return(&mut self) -> ParserOutput<Statement> {
+        self.add_trace("parse return statement");
         self.consume(); // consume return
         self.skip_whitespace();
 
@@ -978,6 +1032,7 @@ impl Parser {
 
     /// A block is a collection of statements wrapped in braces {}
     fn parse_block(&mut self) -> ParserOutput<Vec<Statement>> {
+        self.add_trace("parse block (many statements wrapped in braces)");
         self.skip_whitespace();
         self.then_ignore(Symbol::BraceOpen).and_then(|_| {
             let mut statements = Vec::new();
@@ -1013,6 +1068,7 @@ impl Parser {
     ///
     /// This is functionally the same as the Block but without an open brace (because the open brace should be consumed by the fn declare parser)
     fn parse_statements_many(&mut self) -> ParserOutput<Vec<Statement>> {
+        self.add_trace("parse multiple statements");
         self.skip_whitespace();
         let mut statements = Vec::new();
         let mut diagnostics = Vec::new();
@@ -1043,6 +1099,7 @@ impl Parser {
 
     /// Parse an entire function block (declaration, contracts, body, etc.)
     fn parse_function(&mut self) -> ParserOutput<Function> {
+        self.add_trace("parse a function");
         let mut diagnostics = Vec::new();
 
         // Parse the function declaration
@@ -1063,7 +1120,7 @@ impl Parser {
             }
         };
 
-        // Parse the metadata block
+        // [Optional] Parse the metadata block
         let (properties, permissions) = match self.with_whitespace(|p| p.parse_function_metadata())
         {
             ParserOutput {
@@ -1155,19 +1212,62 @@ impl Parser {
             offset: 0,
             tokens,
             recursion_counter: 0,
+            trace: Vec::new(),
         }
+    }
+
+    /// Debug message to build a "stack trace"
+    ///
+    /// Record the current token, offset, and a message
+    pub fn add_trace(&mut self, message: &str) {
+        self.trace.push(format!(
+            "{}: {} => {}",
+            self.offset, self.tokens[self.offset], message
+        ));
+    }
+
+    /// Travel up the stack until we get to the top level, and then slice this off and return it.
+    pub fn unwind_stack(&self) -> Vec<String> {
+        let mut cut_point: usize = 0;
+        for (i, item) in self.trace.iter().enumerate().rev() {
+            // If a top level parse is last, then skip it so we get more context
+            if item.contains("parse top level declaration") && i < self.trace.len() - 1 {
+                cut_point = i;
+                break;
+            }
+        }
+        let stack: Vec<String> = self
+            .trace
+            .iter()
+            .skip(cut_point)
+            .cloned()
+            .collect::<Vec<String>>();
+        stack
     }
 
     /// Check the next token
     ///
-    /// To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
+    /// (Context) To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
     pub fn peek(&self) -> &Token {
         &self.tokens[self.offset]
     }
 
+    /// Non-destructively skip whitespace to find the next "meaningful" token
+    pub fn lookahead(&self) -> &Token {
+        let mut future_offset = self.offset;
+        // Simulate skipping whitespace
+        while future_offset < self.tokens.len() - 1 {
+            match self.tokens[future_offset].symbol {
+                Symbol::Space | Symbol::NewLine => future_offset += 1,
+                _ => break,
+            }
+        }
+        &self.tokens[future_offset]
+    }
+
     /// Return the next token and advance the cursor
     ///
-    /// To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
+    /// (Context) To avoid running out of bounds, the lexer inserts a dummy newline at the end of the input
     pub fn consume(&mut self) -> &Token {
         let token = &self.tokens[self.offset];
         self.offset += 1;
@@ -1320,6 +1420,12 @@ impl Parser {
                     output: None,
                     diagnostics: item_diags,
                 } => {
+                    // Don't throw on closing brace, just means end of list
+                    if self.peek().symbol == Symbol::BraceClose
+                        || self.peek().symbol == Symbol::NewLine
+                    {
+                        break;
+                    }
                     diagnostics.extend(item_diags);
                     // If we couldn't parse an item and didn't advance, break to avoid an infinite loop
                     if self.offset == initial_offset {
@@ -1503,9 +1609,9 @@ mod tests {
     #[test]
     fn parse_match() {
         let program = r#"match x {
-            0 => 42;
-            1 => { return 43; }
-            _ => 44;
+            0 => 42,
+            1 => { return 43; },
+            _ => 44
         }"#;
 
         let mut lexer = Lexer::new("test");

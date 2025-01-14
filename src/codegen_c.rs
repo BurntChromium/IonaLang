@@ -41,7 +41,9 @@ fn write_struct(input: &Struct) -> String {
         buffer.push_str(&format!(" {};\n", field.name));
     }
     // We already have a trailing newline from the last field
-    buffer.push_str("};");
+    buffer.push_str("};\n");
+    // C doesn't mark a struct as a type by default
+    buffer.push_str(&format!("typedef struct {} {};", input.name, input.name));
     buffer
 }
 
@@ -73,9 +75,11 @@ fn write_enum(input: &Enum) -> String {
     buffer.push_str(&format!("}} {}Values;\n\n", input.name));
     // Create a joined struct (tagged union) to represent the combination
     buffer.push_str(&format!(
-        "struct {} {{\n\t{}States tag;\n\t{}Values data;\n}};",
+        "struct {} {{\n\t{}States tag;\n\t{}Values data;\n}};\n",
         input.name, input.name, input.name
     ));
+    // C doesn't mark a struct as a type by default
+    buffer.push_str(&format!("typedef struct {} {};", input.name, input.name));
     buffer
 }
 
@@ -83,12 +87,12 @@ fn write_enum(input: &Enum) -> String {
 
 fn write_fn_type(input: &Type) -> Cow<'static, str> {
     match input {
-        Type::String => Cow::Borrowed("\tchar"),
-        Type::Integer => Cow::Borrowed("\tint_fast64_t"),
-        Type::Boolean => Cow::Borrowed("\tbool"),
-        Type::Custom(name) => Cow::Owned(format!("\t {}", name)),
-        Type::Generic(_) => Cow::Borrowed("\tvoid*"),
-        Type::Void => Cow::Borrowed("\tvoid"),
+        Type::String => Cow::Borrowed("char"),
+        Type::Integer => Cow::Borrowed("int_fast64_t"),
+        Type::Boolean => Cow::Borrowed("bool"),
+        Type::Custom(name) => Cow::Owned(format!("{}", name)),
+        Type::Generic(_) => Cow::Borrowed("void*"),
+        Type::Void => Cow::Borrowed("void"),
         _ => todo!(),
     }
 }
