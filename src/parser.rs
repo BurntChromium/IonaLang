@@ -105,6 +105,8 @@ pub enum Type {
     Integer,
     String,
     Boolean,
+    Size,
+    Byte,
     Array(Box<Type>),
     Map(Box<Type>),
     Shared(Box<Type>),
@@ -246,6 +248,8 @@ impl Parser {
             "Int" => ParserOutput::okay(Type::Integer),
             "Str" => ParserOutput::okay(Type::String),
             "Bool" => ParserOutput::okay(Type::Boolean),
+            "Size" => ParserOutput::okay(Type::Size),
+            "Byte" => ParserOutput::okay(Type::Byte),
             "Void" => ParserOutput::okay(Type::Void),
             _ => ParserOutput::okay(Type::Custom(name)),
         })

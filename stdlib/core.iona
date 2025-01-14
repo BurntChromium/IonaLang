@@ -6,8 +6,8 @@ enum Maybe {
     None,
 
     @metadata {
-        Is: [Export]
-        Derives: [Eq, Show]
+        Is: Export;
+        Derives: Eq, Show;
     }
 }
 
@@ -17,7 +17,7 @@ enum Result {
     Error: Generic<E>,
 
     @metadata {
-        Is: [Export],
-        Derives: [Eq, Show]
+        Is: Export;
+        Derives: Eq, Show;
     }
 }
