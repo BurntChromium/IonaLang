@@ -1,4 +1,4 @@
-# String functions and data types for Iona
+#! String functions and data types for Iona
 
 #! `String`s are dynamically sized buffers of bytes (`char`s in C)
 struct String {

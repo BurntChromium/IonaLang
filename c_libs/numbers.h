@@ -6,17 +6,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-//! The Integer class is a 64 bit integer
+/// @brief the Integer class is a 64 bit (signed) integer
 typedef struct {
     int64_t value;
 } Integer;
 
-//! The Float class is a 64 bit float
+/// @brief the Float class is a 64 bit double
 typedef struct {
     double value;
 } Float;
 
-//! Integer value from C integer
+/// @brief Integer value from C integer
+/// @param value the C int64
+/// @return an Integer instance
 Integer integer_from(int64_t value) {
     Integer i = {
         .value = value
@@ -24,7 +26,9 @@ Integer integer_from(int64_t value) {
     return i;
 }
 
-//! Float value from C double
+/// @brief Convert C double to Iona Float
+/// @param value the C double
+/// @return an Iona Float instance
 Float float_from(double value) {
     Float f = {
         .value = value

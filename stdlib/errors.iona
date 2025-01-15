@@ -1,6 +1,6 @@
-# Core functions and data types for Iona
+#! Error handling functions and data types for Iona
 
-# `Maybe` represents a possibly missing value
+#! `Maybe` represents a possibly missing value
 enum Maybe {
     Some: Generic<T>,
     None,
@@ -11,7 +11,7 @@ enum Maybe {
     }
 }
 
-# `Result` represents either success or failure
+#! `Result` represents either success or failure
 enum Result {
     Okay: Generic<O>,
     Error: Generic<E>,

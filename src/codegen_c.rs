@@ -3,8 +3,30 @@
 //! Note: we don't lift the type writing into a function because it's somewhat context dependent (ex. strings cannot have Void types but Enums can)
 
 use std::borrow::Cow;
+use std::fs;
 
 use crate::parser::*;
+
+// -------------------- Monomorphization Templates --------------------
+
+/// Load a C header template for monomorphization
+pub fn load_c_template(template_name: &str) -> String {
+    fs::read_to_string(format!("/c_libs/templates/{}", template_name))
+        .expect("could not find template, are the c_libs missing?")
+}
+
+/// Generate specialized C array code
+fn monomorphize_array_template(template: &str, iona_type_name: &str, c_type_name: &str) -> String {
+    let array_name = format!("{}Array", iona_type_name);
+    let elem_type = c_type_name;
+    let prefix = iona_type_name;
+    template
+        .replace("ARRAY_NAME", &array_name)
+        .replace("ELEM_TYPE", elem_type)
+        .replace("PREFIX", prefix)
+}
+
+// -------------------- Programmatic C Code --------------------
 
 /// Handles import for core libraries
 ///
