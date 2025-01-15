@@ -1,4 +1,5 @@
 #include <float.h>
+#include <math.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -56,6 +57,22 @@ char* float_show(Float num) {
     }
     snprintf(str, FLOAT_BUFFER_SIZE, "%.17g", num.value); // %.17g for compact representation of doubles
     return str;
+}
+
+//! Checks if two integers are equal
+bool integer_equals(Integer a, Integer b) {
+    return a.value == b.value;
+}
+
+//! Checks if two floats are equal
+//! 
+//! TODO: improve
+bool float_equals(Float a, Float b) {
+    if (a.value == b.value) {
+        return true;
+    } else {
+        return (fabs(a.value) - fabs(b.value)) < DBL_EPSILON;
+    }
 }
 
 // -------------------- Basic Arithmetic --------------------
