@@ -1,0 +1,11 @@
+#! Arrays are dynamically resized containers
+
+struct Array {
+    data: RawBuffer<T>,
+    len: Size,
+    capacity: Size
+
+     @metadata {
+        Is: Export;
+    }
+}

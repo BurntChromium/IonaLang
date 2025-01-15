@@ -1,10 +1,8 @@
 # String functions and data types for Iona
 
-# `String` represents a buffer of bytes (C chars) with a fat pointer
+#! `String`s are dynamically sized buffers of bytes (`char`s in C)
 struct String {
-    data: Array<Byte>,
-    len: Size,
-    capacity: Size
+    data: Array<Byte>
 
     @metadata {
         Is: Export;
