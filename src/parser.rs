@@ -107,6 +107,8 @@ pub enum Type {
     Boolean,
     Size,
     Byte,
+    Auto,
+    CType, // special type for certain standard library primitives
     Array(Box<Type>),
     Map(Box<Type>),
     Shared(Box<Type>),
@@ -245,12 +247,39 @@ impl Parser {
         }
         // Handle everything else
         self.then_identifier().and_then(|name| match name.as_str() {
+            "Auto" => ParserOutput::okay(Type::Auto),
             "Int" => ParserOutput::okay(Type::Integer),
-            "Str" => ParserOutput::okay(Type::String),
+            "String" => ParserOutput::okay(Type::String),
             "Bool" => ParserOutput::okay(Type::Boolean),
             "Size" => ParserOutput::okay(Type::Size),
             "Byte" => ParserOutput::okay(Type::Byte),
             "Void" => ParserOutput::okay(Type::Void),
+            "RawCType" => ParserOutput::okay(Type::CType),
+            // Handle boxed types
+            "Array" | "Map" | "Shared" => {
+                // Expect and consume a left angle bracket
+                self.then_ignore(Symbol::LeftAngle);
+
+                // Recursively parse the inner type
+                let inner_type = self.parse_type();
+                if inner_type.output.is_some() {
+                    // Expect and consume a right angle bracket
+                    self.then_ignore(Symbol::RightAngle);
+                    let unwrapped_inner_type = inner_type.output.unwrap();
+
+                    // Construct the appropriate boxed type
+                    let boxed_type = match name.as_str() {
+                        "Array" => Type::Array(Box::new(unwrapped_inner_type)),
+                        "Map" => Type::Map(Box::new(unwrapped_inner_type)),
+                        "Shared" => Type::Shared(Box::new(unwrapped_inner_type)),
+                        _ => unreachable!(),
+                    };
+
+                    ParserOutput::okay(boxed_type)
+                } else {
+                    return inner_type;
+                }
+            }
             _ => ParserOutput::okay(Type::Custom(name)),
         })
     }
@@ -1458,6 +1487,48 @@ mod tests {
     use crate::lexer::Lexer;
 
     #[test]
+    fn parse_types_string() {
+        let program_text = "String";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_type();
+        let expected = Type::String;
+        assert!(out.output.is_some());
+        assert_eq!(out.output.unwrap(), expected);
+    }
+
+    #[test]
+    fn parse_types_array() {
+        let program_text = "Array<Int>";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_type();
+        let expected = Type::Array(Box::new(Type::Integer));
+        assert!(out.output.is_some());
+        assert_eq!(out.output.unwrap(), expected);
+    }
+
+    #[test]
+    fn parse_types_generic() {
+        let program_text = "Generic<T>";
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_type();
+        let expected = Type::Generic("T".to_string());
+        assert!(out.output.is_some());
+        assert_eq!(out.output.unwrap(), expected);
+    }
+
+    #[test]
     fn parse_fn_declaration() {
         let program_text = "fn foo(a: Int, b: Int) -> Int {";
         // Lex
@@ -1660,7 +1731,7 @@ mod tests {
                     Out: (result > 0, "output must be greater than 0")
                 }
 
-                let x: Shared = add(a, 5);
+                let x: Shared<Auto> = add(a, 5);
                 let y: Auto = minus(x, 2);
                 x = -3;
                 return x;
@@ -1673,6 +1744,9 @@ mod tests {
         let result = parser.parse_function();
         println!("{:#?}", result.diagnostics);
         assert!(result.output.is_some());
+        for d in result.diagnostics.iter() {
+            eprint!("{}", d.display(program));
+        }
         assert!(
             result.diagnostics.is_empty(),
             "Expected no diagnostics, but found: {:?}",

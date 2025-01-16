@@ -1,6 +1,6 @@
 #! Arrays are dynamically resized containers
 struct Array {
-    data: RawBuffer<T>,
+    data: RawCType,
     len: Size,
     capacity: Size
 

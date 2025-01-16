@@ -10,7 +10,7 @@ pub fn file_to_ast(filepath: &str, verbose: bool) -> Result<Vec<ASTNode>, Box<dy
     // Try to open linked file
     let maybe_text = fs::read_to_string(filepath);
     let program_text: String = if maybe_text.is_err() {
-        return Err(format!("unable to find file {}, aborting compilation", filepath).into());
+        return Err(format!("unable to find file {}, aborting compilation\n", filepath).into());
     } else {
         maybe_text.unwrap()
     };
@@ -40,7 +40,7 @@ pub fn file_to_ast(filepath: &str, verbose: bool) -> Result<Vec<ASTNode>, Box<dy
             )
             .into());
         } else {
-            eprintln!("non-fatal errors\n{:#?}", message_buffer);
+            eprintln!("non-fatal errors\n{}", message_buffer);
             return Ok(out.output.unwrap());
         }
     } else {

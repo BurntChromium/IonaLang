@@ -1,10 +1,10 @@
-// source: ./test_programs/comprehensive.iona
+// source: test_programs/comprehensive.iona
 
 #include <stdbool.h>
-#include <stdint.h>
+#include "../c_libs/numbers.h"
 
 struct Animal {
-	int_fast64_t legs;
+	Integer legs;
 	bool hair;
 	bool feathers;
 };
@@ -18,7 +18,7 @@ typedef enum {
 } PetsStates;
 
 typedef union {
-	int_fast64_t Cat;
+	Integer Cat;
 } PetsValues;
 
 struct Pets {

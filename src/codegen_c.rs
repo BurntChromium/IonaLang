@@ -33,7 +33,7 @@ fn monomorphize_array_template(template: &str, iona_type_name: &str, c_type_name
 /// TODO: actually dynamically handle imports...
 fn write_header(filename: &str) -> String {
     format!(
-        "// source: {}\n\n#include <stdbool.h>\n#include <stdint.h>\n\n",
+        "// source: {}\n\n#include <stdbool.h>\n#include \"../c_libs/numbers.h\"\n\n",
         filename
     )
 }
@@ -53,12 +53,16 @@ fn write_struct(input: &Struct) -> String {
     for field in input.fields.iter() {
         match &field.field_type {
             Type::String => buffer.push_str("\tchar"),
-            Type::Integer => buffer.push_str("\tint_fast64_t"),
+            Type::Byte => buffer.push_str("\tchar"),
+            Type::Integer => buffer.push_str("\tInteger"),
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
             Type::Generic(_) => buffer.push_str("\tvoid*"),
             Type::Void => panic!("A struct cannot have type Void. This error indicates that there is a compiler issue, it should have been caught before code generation."), // this should not be possible
-            _ => todo!()
+            _ => {
+                println!("WARNING: cannot emit type {:#?} yet", &field.field_type);
+                buffer.push_str("\tNOT_IMPLEMENTED");
+            }
         }
         buffer.push_str(&format!(" {};\n", field.name));
     }
@@ -84,13 +88,17 @@ fn write_enum(input: &Enum) -> String {
     for field in input.fields.iter() {
         // Don't assign data to Void types (state only)
         match &field.field_type {
-            Type::Void => continue,
             Type::String => buffer.push_str("\tchar"),
-            Type::Integer => buffer.push_str("\tint_fast64_t"),
+            Type::Byte => buffer.push_str("\tchar"),
+            Type::Integer => buffer.push_str("\tInteger"),
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Generic(_) => buffer.push_str("\tvoid*"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
-            _ => todo!(),
+            Type::Void => continue,
+            _ => {
+                println!("WARNING: cannot emit type {:#?} yet", &field.field_type);
+                buffer.push_str("\tNOT_IMPLEMENTED");
+            }
         }
         buffer.push_str(&format!(" {};\n", field.name));
     }
@@ -110,7 +118,8 @@ fn write_enum(input: &Enum) -> String {
 fn write_fn_type(input: &Type) -> Cow<'static, str> {
     match input {
         Type::String => Cow::Borrowed("char"),
-        Type::Integer => Cow::Borrowed("int_fast64_t"),
+        Type::Byte => Cow::Borrowed("char"),
+        Type::Integer => Cow::Borrowed("Integer"),
         Type::Boolean => Cow::Borrowed("bool"),
         Type::Custom(name) => Cow::Owned(format!("{}", name)),
         Type::Generic(_) => Cow::Borrowed("void*"),
