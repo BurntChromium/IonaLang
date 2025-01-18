@@ -5,6 +5,7 @@
 use std::borrow::Cow;
 use std::fs;
 
+use crate::aggregation::TypeTable;
 use crate::parser::*;
 
 // -------------------- Monomorphization Templates --------------------
@@ -12,7 +13,7 @@ use crate::parser::*;
 /// Load a C header template for monomorphization
 pub fn load_c_template(template_name: &str) -> String {
     fs::read_to_string(format!("/c_libs/templates/{}", template_name))
-        .expect("could not find template, are the c_libs missing?")
+        .expect(&format!("could not find template for {}, are the c_libs missing? (check for /c_libs/templates/{}.h)", template_name, template_name))
 }
 
 /// Generate specialized C array code
@@ -27,6 +28,20 @@ fn monomorphize_array_template(template: &str, iona_type_name: &str, c_type_name
 }
 
 // -------------------- Programmatic C Code --------------------
+
+/// Check the Type Table to see which standard libraries we need
+fn identify_std_libs(type_table: TypeTable) -> Vec<String> {
+    let mut output: Vec<String> = Vec::new();
+    for t in type_table.type_list.iter() {
+        match t {
+            Type::String => output.push("gen_strings.h".to_string()),
+            Type::Integer | Type::Float => output.push("numbers.h".to_string()),
+            Type::Boolean => output.push("stdbool.h".to_string()),
+            _ => {}
+        }
+    }
+    output
+}
 
 /// Handles import for core libraries
 ///

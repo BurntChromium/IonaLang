@@ -99,10 +99,11 @@ impl<T> ParserOutputExt<T> for ParserOutput<T> {
 
 // -------------------- AST --------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Void,
     Integer,
+    Float,
     String,
     Boolean,
     Size,
@@ -249,6 +250,7 @@ impl Parser {
         self.then_identifier().and_then(|name| match name.as_str() {
             "Auto" => ParserOutput::okay(Type::Auto),
             "Int" => ParserOutput::okay(Type::Integer),
+            "Float" => ParserOutput::okay(Type::Float),
             "String" => ParserOutput::okay(Type::String),
             "Bool" => ParserOutput::okay(Type::Boolean),
             "Size" => ParserOutput::okay(Type::Size),
@@ -544,7 +546,7 @@ pub struct FunctionContract {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Branch {
     condition: Option<Expr>, // None is the catch all case (`_` in a match or `else` in a ternary)
-    computation: Vec<Statement>,
+    pub computations: Vec<Statement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -898,7 +900,7 @@ impl Parser {
 
         branches.push(Branch {
             condition: Some(condition.output.unwrap()),
-            computation: block_result.output.unwrap(),
+            computations: block_result.output.unwrap(),
         });
 
         // Parse elif branches
@@ -926,7 +928,7 @@ impl Parser {
 
             branches.push(Branch {
                 condition: Some(elif_condition.output.unwrap()),
-                computation: elif_block.output.unwrap(),
+                computations: elif_block.output.unwrap(),
             });
         }
 
@@ -944,7 +946,7 @@ impl Parser {
 
             branches.push(Branch {
                 condition: None,
-                computation: else_block.output.unwrap(),
+                computations: else_block.output.unwrap(),
             });
         }
 
@@ -1038,7 +1040,7 @@ impl Parser {
 
             branches.push(Branch {
                 condition,
-                computation,
+                computations: computation,
             });
         }
 
@@ -1667,15 +1669,15 @@ mod tests {
 
                 // Check if branch
                 assert!(branches[0].condition.is_some());
-                assert_eq!(branches[0].computation.len(), 1);
+                assert_eq!(branches[0].computations.len(), 1);
 
                 // Check elif branch
                 assert!(branches[1].condition.is_some());
-                assert_eq!(branches[1].computation.len(), 1);
+                assert_eq!(branches[1].computations.len(), 1);
 
                 // Check else branch
                 assert!(branches[2].condition.is_none());
-                assert_eq!(branches[2].computation.len(), 1);
+                assert_eq!(branches[2].computations.len(), 1);
             }
             _ => panic!("Expected Conditional"),
         }
@@ -1703,15 +1705,15 @@ mod tests {
 
                 // Check literal match
                 assert_eq!(branches[0].condition, Some(Expr::IntegerLiteral(0)));
-                assert_eq!(branches[0].computation.len(), 1);
+                assert_eq!(branches[0].computations.len(), 1);
 
                 // Check block match
                 assert_eq!(branches[1].condition, Some(Expr::IntegerLiteral(1)));
-                assert_eq!(branches[1].computation.len(), 1);
+                assert_eq!(branches[1].computations.len(), 1);
 
                 // Check catch-all
                 assert!(branches[2].condition.is_none());
-                assert_eq!(branches[2].computation.len(), 1);
+                assert_eq!(branches[2].computations.len(), 1);
             }
             _ => panic!("Expected Conditional"),
         }

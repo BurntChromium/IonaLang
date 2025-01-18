@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod aggregation;
 mod cli;
 mod codegen_c;
 mod diagnostics;
