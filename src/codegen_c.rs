@@ -17,12 +17,22 @@ pub fn load_c_template(template_name: &str) -> String {
 }
 
 /// Generate specialized C array code
-fn monomorphize_array_template(template: &str, iona_type_name: &str, c_type_name: &str) -> String {
-    let array_name = format!("{}Array", iona_type_name);
-    let elem_type = c_type_name;
-    let prefix = iona_type_name;
+///
+/// `array_type_name`: something like ByteArray or IntArray
+///
+/// `type_method_prefix`: byte_array or int_array
+///
+/// `c_type`: the underlying c type (or the appropriate new type defined in C like `Integer` or `Float`)
+fn monomorphize_array_template(
+    template: &str,
+    array_type_name: &str,
+    type_method_prefix: &str,
+    c_type: &str,
+) -> String {
+    let elem_type = c_type;
+    let prefix = type_method_prefix;
     template
-        .replace("ARRAY_NAME", &array_name)
+        .replace("ARRAY_NAME", &array_type_name)
         .replace("ELEM_TYPE", elem_type)
         .replace("PREFIX", prefix)
 }

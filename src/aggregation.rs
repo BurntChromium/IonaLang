@@ -5,6 +5,25 @@ use std::collections::{HashMap, HashSet};
 
 use crate::parser::{ASTNode, Enum, Statement, Struct, Type};
 
+pub struct ParsingTables {
+    pub modules: ModuleTable,
+    pub types: TypeTable,
+}
+
+impl ParsingTables {
+    pub fn new() -> ParsingTables {
+        ParsingTables {
+            modules: ModuleTable::new(),
+            types: TypeTable::new(),
+        }
+    }
+
+    pub fn update(&mut self, nodes: &Vec<ASTNode>) {
+        self.modules.update(nodes);
+        self.types.update(nodes);
+    }
+}
+
 /// Track all declared module imports
 ///
 /// Each key in the HashMaps corresponds to a filename
@@ -18,7 +37,7 @@ use crate::parser::{ASTNode, Enum, Statement, Struct, Type};
 /// If the `imported_items` and the `exported_items` don't align, then we've got a problem!
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModuleTable {
-    parsing_status: HashMap<String, bool>,
+    pub parsing_status: HashMap<String, bool>,
     imported_items: HashMap<String, HashSet<String>>,
     public_items: HashMap<String, HashSet<String>>,
     exported_items: HashMap<String, HashSet<String>>,
