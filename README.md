@@ -2,7 +2,7 @@
 
 Iona is a high-level, imperative programming language with advanced features normally found in functional languages. Currently, Iona compiles to C. 
 
-**Caveat**: This is a personal project, and is not ready nor for production (or any) use at the moment.
+**Caveat**: This is a personal project, and is not ready for production (or any) use at the moment.
 
 ### Current Status
 
