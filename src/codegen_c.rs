@@ -85,7 +85,7 @@ fn write_struct(input: &Struct) -> String {
             Type::Generic(_) => buffer.push_str("\tvoid*"),
             Type::Void => panic!("A struct cannot have type Void. This error indicates that there is a compiler issue, it should have been caught before code generation."), // this should not be possible
             _ => {
-                println!("WARNING: cannot emit type {:#?} yet", &field.field_type);
+                println!("WARNING: cannot emit type {:?} yet", &field.field_type);
                 buffer.push_str("\tNOT_IMPLEMENTED");
             }
         }
