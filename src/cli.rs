@@ -1,6 +1,7 @@
 //! Command line interface for the compiler
 
 use std::error::Error;
+use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -12,7 +13,7 @@ pub enum Mode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     StdLib,
-    Entrypoint(String),
+    Entrypoint(Box<Path>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub fn parse_args(args: &Vec<String>) -> Result<Command, Box<dyn Error>> {
     if args.len() < 2 {
         return Err("you must pass at least 1 argument to the compiler".into());
     }
+    // Arg 1 is compiler mode
     let mode: Mode;
     match args[1].as_str() {
         "build" => mode = Mode::Build,
@@ -38,6 +40,7 @@ pub fn parse_args(args: &Vec<String>) -> Result<Command, Box<dyn Error>> {
         "test" => mode = Mode::Test,
         _ => unreachable!("compiler must be invoked in 'build', 'check', or 'test' mode"),
     }
+    // Args 2+ is flags and target
     if args.len() >= 2 {
         let mut flags: Vec<Flags> = Vec::new();
         let mut maybe_target: Option<Target> = None;
@@ -52,7 +55,7 @@ pub fn parse_args(args: &Vec<String>) -> Result<Command, Box<dyn Error>> {
                 });
             } else {
                 if arg.ends_with(".iona") {
-                    maybe_target = Some(Target::Entrypoint(arg.clone()));
+                    maybe_target = Some(Target::Entrypoint(Path::new(arg).into()));
                 } else if arg == "stdlib" {
                     maybe_target = Some(Target::StdLib);
                 }
@@ -60,11 +63,11 @@ pub fn parse_args(args: &Vec<String>) -> Result<Command, Box<dyn Error>> {
         }
         return Ok(Command {
             mode,
-            target: maybe_target.unwrap_or(Target::Entrypoint("main.iona".to_string())),
+            target: maybe_target.unwrap_or(Target::Entrypoint(Path::new("main.iona").into())),
             flags,
         });
     } else {
-        let target: Target = Target::Entrypoint("main.iona".to_string());
+        let target: Target = Target::Entrypoint(Path::new("main.iona").into());
         return Ok(Command {
             mode,
             target,

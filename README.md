@@ -20,6 +20,8 @@ Iona is a high-level, imperative programming language with advanced features nor
 - Create code generation for functions 
 - Get strings working
 - Handle memory management for doubly-nested data structures
+- Support compiler mode arguments (beyond "build")
+- Major perf regression after switching to Paths from Strings
 
 ## Language Features
 

@@ -190,5 +190,7 @@ mod tests {
         println!("{:#?}", import_table);
         assert!(import_table.parsing_status.contains_key("npc"));
         assert_eq!(*import_table.parsing_status.get("npc").unwrap(), false);
+        // assert!(!import_table.imported_items.get("").unwrap().is_empty());
+        // assert_eq!(import_table.imported_items, vec!["Creature".to_string()]);
     }
 }

@@ -32,11 +32,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             std::process::exit(1);
         }
         let ast = maybe_ast.unwrap();
-        let generated_code = codegen_c::write_all(&file, ast.iter());
+        let generated_code = codegen_c::write_all(&file.to_string_lossy(), ast.iter());
         fs::write("gen/test_case.c", generated_code).expect("Unable to write file");
         let t_all = Instant::now();
         // Report on code timings
-        println!("finished compiling {} in {:?}", &file, t_all - t_start);
+        println!(
+            "finished compiling {} in {:?}",
+            &file.to_string_lossy(),
+            t_all - t_start
+        );
         return Ok(());
     }
     // Compile the standard library
@@ -44,10 +48,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         let paths = fs::read_dir("stdlib").expect("unable to find /stdlib/ directory in root");
         for path in paths {
             let file = path.unwrap();
-            let maybe_ast = pipeline::file_to_ast(
-                file.path().to_str().unwrap(),
-                command.flags.contains(&Flags::Verbose),
-            );
+            let maybe_ast =
+                pipeline::file_to_ast(&file.path(), command.flags.contains(&Flags::Verbose));
             if let Err(e) = maybe_ast {
                 eprint!("{}", e);
                 std::process::exit(1);

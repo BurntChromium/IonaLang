@@ -5,6 +5,12 @@ use crate::lexer::{Symbol, Token};
 
 // -------------------- Parser Object --------------------
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParserMetadata {
+    pub directory: String,
+    pub filename: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parser {
     tokens: Vec<Token>,

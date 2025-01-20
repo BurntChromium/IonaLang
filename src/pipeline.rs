@@ -3,21 +3,22 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
+use std::path::Path;
 
 use crate::aggregation::ParsingTables;
 use crate::lexer::Lexer;
 use crate::parser::{ASTNode, Parser};
 
-pub fn file_to_ast(filepath: &str, verbose: bool) -> Result<Vec<ASTNode>, Box<dyn Error>> {
+pub fn file_to_ast(filepath: &Path, verbose: bool) -> Result<Vec<ASTNode>, Box<dyn Error>> {
     // Try to open linked file
     let maybe_text = fs::read_to_string(filepath);
     let program_text: String = if maybe_text.is_err() {
-        return Err(format!("unable to find file {}, aborting compilation\n", filepath).into());
+        return Err(format!("unable to find file {:?}, aborting compilation\n", filepath).into());
     } else {
         maybe_text.unwrap()
     };
     // Lex
-    let mut lexer = Lexer::new(filepath);
+    let mut lexer = Lexer::new(&filepath.to_string_lossy());
     lexer.lex(&program_text);
     // Parse the file
     let mut parser = Parser::new(lexer.token_stream);
@@ -58,7 +59,7 @@ fn parse_recursively(
 ) -> Result<(), Box<dyn Error>> {
     for (module, is_parsed) in tables_handle.modules.parsing_status.clone().iter() {
         if !*is_parsed {
-            let new_nodes = file_to_ast(module, verbose)?;
+            let new_nodes = file_to_ast(Path::new(module), verbose)?;
             tables_handle.update(&new_nodes);
             ast_map_handle.insert(module.to_string(), new_nodes);
             parse_recursively(ast_map_handle, tables_handle, verbose)?;
@@ -68,14 +69,31 @@ fn parse_recursively(
 }
 
 pub fn parse_all_reachable(
-    entrypoint_filepath: &str,
+    entrypoint_filepath: &Path,
     verbose: bool,
 ) -> Result<HashMap<String, Vec<ASTNode>>, Box<dyn Error>> {
     let mut output: HashMap<String, Vec<ASTNode>> = HashMap::new();
     let entrypoint_nodes = file_to_ast(entrypoint_filepath, verbose)?;
     let mut tables = ParsingTables::new();
     // We don't need these nodes anymore so put them in the table
-    output.insert(entrypoint_filepath.to_string(), entrypoint_nodes);
+    output.insert(
+        entrypoint_filepath.to_string_lossy().to_string(),
+        entrypoint_nodes,
+    );
     parse_recursively(&mut output, &mut tables, verbose)?;
     Ok(output)
 }
+
+// -------------------- Unit Tests --------------------
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::lexer::Lexer;
+//     use crate::parser::Parser;
+
+//     #[test]
+//     fn parse_reachable() {
+
+//     }
+// }
