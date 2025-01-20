@@ -12,8 +12,28 @@ use crate::parser::*;
 
 /// Load a C header template for monomorphization
 pub fn load_c_template(template_name: &str) -> String {
-    fs::read_to_string(format!("/c_libs/templates/{}", template_name))
-        .expect(&format!("could not find template for {}, are the c_libs missing? (check for /c_libs/templates/{}.h)", template_name, template_name))
+    fs::read_to_string(format!("c_libs/templates/{}", template_name)).expect(&format!(
+        "could not find template for {}, are the c_libs missing? (check for /c_libs/templates/{})",
+        template_name, template_name
+    ))
+}
+
+/// A concrete, monomorphized type
+///
+/// header_file means the actual .h file, while header_name is the name of that file
+trait TemplateInstance {
+    fn get_type(&self) -> &Type;
+    fn get_name(&self) -> &str;
+    fn get_header_file(&self) -> &str;
+    fn get_header_name(&self) -> &str;
+}
+
+/// TODO: extend this to handle doubly-nested types (Array<Array<Byte>> or Array<Map<String, T>> or whatever)
+struct MonomorphizedArray {
+    type_: Type,
+    name: String,
+    header_file: String,
+    header_name: String,
 }
 
 /// Generate specialized C array code
@@ -37,20 +57,100 @@ fn monomorphize_array_template(
         .replace("PREFIX", prefix)
 }
 
+/// TODO: make recursive
+fn boxed_type_name(type_: &Type) -> String {
+    match type_ {
+        Type::Array(inner) => format!("{}Array", write_fn_arg_type(inner)),
+        _ => todo!(),
+    }
+}
+
+impl MonomorphizedArray {
+    fn new(type_: &Type) -> MonomorphizedArray {
+        let template = load_c_template("array.h");
+        let header_file = monomorphize_array_template(
+            &template,
+            &format!("{}Array", write_fn_arg_type(type_)),
+            &format!("{}_array", write_fn_arg_type(type_).to_lowercase()),
+            &write_fn_arg_type(type_),
+        );
+        let header_name: String =
+            format!("gen_{}_array.h", write_fn_arg_type(type_).to_lowercase());
+        MonomorphizedArray {
+            type_: type_.clone(),
+            name: write_fn_arg_type(&type_).to_string(),
+            header_file,
+            header_name,
+        }
+    }
+}
+
+impl TemplateInstance for MonomorphizedArray {
+    fn get_type(&self) -> &Type {
+        &self.type_
+    }
+
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    fn get_header_file(&self) -> &str {
+        &self.header_file
+    }
+
+    fn get_header_name(&self) -> &str {
+        &self.header_name
+    }
+}
+
 // -------------------- Programmatic C Code --------------------
 
+/// Holds names of
+///
+/// - existing libs that we need to import
+///
+/// - bundled data for monomorphized templates
+pub struct StdLibHandler {
+    pre_existing_lib_names: Vec<String>,
+    generated_libs: Vec<Box<dyn TemplateInstance>>,
+}
+
 /// Check the Type Table to see which standard libraries we need
-fn identify_std_libs(type_table: TypeTable) -> Vec<String> {
-    let mut output: Vec<String> = Vec::new();
+///
+/// This also emits import headers for generated
+pub fn identify_std_libs(type_table: &TypeTable) -> StdLibHandler {
+    let mut pre_existing_lib_names: Vec<String> = Vec::new();
+    let mut generated_libs: Vec<Box<dyn TemplateInstance>> = Vec::new();
     for t in type_table.type_list.iter() {
         match t {
-            Type::String => output.push("gen_strings.h".to_string()),
-            Type::Integer | Type::Float => output.push("numbers.h".to_string()),
-            Type::Boolean => output.push("stdbool.h".to_string()),
+            Type::String => pre_existing_lib_names.push("gen_strings.h".to_string()),
+            Type::Integer | Type::Float => pre_existing_lib_names.push("numbers.h".to_string()),
+            Type::Byte => pre_existing_lib_names.push("bytes.h".to_string()),
+            Type::Boolean => pre_existing_lib_names.push("stdbool.h".to_string()),
+            Type::Array(inner) => {
+                let data = MonomorphizedArray::new(inner);
+                generated_libs.push(Box::new(data));
+            }
             _ => {}
         }
     }
-    output
+    StdLibHandler {
+        pre_existing_lib_names,
+        generated_libs,
+    }
+}
+
+pub fn emit_templated_stdlib_files(lib_handler: &StdLibHandler) {
+    for lib in lib_handler.generated_libs.iter() {
+        fs::write(
+            format!("c_libs/{}", lib.get_header_name()),
+            lib.get_header_file(),
+        )
+        .expect(&format!(
+            "Unable to write generated header file: {}",
+            lib.get_header_name()
+        ));
+    }
 }
 
 /// Handles import for core libraries
@@ -67,7 +167,7 @@ fn write_header(filename: &str) -> String {
 ///
 /// C doesn't have a notion of qualified imports so this is really simple (qualification is handled by the compiler)
 fn write_import(input: &Import) -> String {
-    format!("#include \"{}\"", input.file)
+    format!("#include \"{}.h\"", input.file)
 }
 
 /// Write a Struct to a C struct
@@ -77,12 +177,13 @@ fn write_struct(input: &Struct) -> String {
     let mut buffer: String = format!("struct {} {{\n", input.name);
     for field in input.fields.iter() {
         match &field.field_type {
-            Type::String => buffer.push_str("\tchar"),
-            Type::Byte => buffer.push_str("\tchar"),
+            Type::String => buffer.push_str("\tString"),
+            Type::Byte => buffer.push_str("\tByte"),
             Type::Integer => buffer.push_str("\tInteger"),
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
             Type::Generic(_) => buffer.push_str("\tvoid*"),
+            Type::Array(_) => buffer.push_str(&format!("\t{}", boxed_type_name(&field.field_type))),
             Type::Void => panic!("A struct cannot have type Void. This error indicates that there is a compiler issue, it should have been caught before code generation."), // this should not be possible
             _ => {
                 println!("WARNING: cannot emit type {:?} yet", &field.field_type);
@@ -113,11 +214,12 @@ fn write_enum(input: &Enum) -> String {
     for field in input.fields.iter() {
         // Don't assign data to Void types (state only)
         match &field.field_type {
-            Type::String => buffer.push_str("\tchar"),
-            Type::Byte => buffer.push_str("\tchar"),
+            Type::String => buffer.push_str("\tString"),
+            Type::Byte => buffer.push_str("\tByte"),
             Type::Integer => buffer.push_str("\tInteger"),
             Type::Boolean => buffer.push_str("\tbool"),
             Type::Generic(_) => buffer.push_str("\tvoid*"),
+            Type::Array(_) => buffer.push_str(&format!("\t{}", boxed_type_name(&field.field_type))),
             Type::Custom(name) => buffer.push_str(&format!("\t {}", name)),
             Type::Void => continue,
             _ => {
@@ -140,23 +242,25 @@ fn write_enum(input: &Enum) -> String {
 
 // -------------------- Functions --------------------
 
-fn write_fn_type(input: &Type) -> Cow<'static, str> {
+fn write_fn_arg_type(input: &Type) -> Cow<'static, str> {
     match input {
-        Type::String => Cow::Borrowed("char"),
-        Type::Byte => Cow::Borrowed("char"),
+        Type::String => Cow::Borrowed("String"),
+        Type::Byte => Cow::Borrowed("Byte"),
         Type::Integer => Cow::Borrowed("Integer"),
+        Type::Float => Cow::Borrowed("Float"),
         Type::Boolean => Cow::Borrowed("bool"),
         Type::Custom(name) => Cow::Owned(format!("{}", name)),
         Type::Generic(_) => Cow::Borrowed("void*"),
+        Type::Array(_) => Cow::Owned(boxed_type_name(input)),
         Type::Void => Cow::Borrowed("void"),
         _ => todo!(),
     }
 }
 
 fn write_fn_declare(input: &Function) -> String {
-    let mut buffer: String = format!("{} {}(", write_fn_type(&input.returns), input.name);
+    let mut buffer: String = format!("{} {}(", write_fn_arg_type(&input.returns), input.name);
     for arg in &input.args {
-        buffer += &format!("{} {}, ", write_fn_type(&arg.field_type), arg.name);
+        buffer += &format!("{} {}, ", write_fn_arg_type(&arg.field_type), arg.name);
     }
     // Remove the trailing `, `
     buffer.pop();

@@ -14,6 +14,7 @@ use std::error::Error;
 use std::fs;
 use std::time::Instant;
 
+use aggregation::ParsingTables;
 use cli::{Flags, Target};
 
 /// Which standard library files should we NOT emit?
@@ -48,8 +49,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         let paths = fs::read_dir("stdlib").expect("unable to find /stdlib/ directory in root");
         for path in paths {
             let file = path.unwrap();
-            let maybe_ast =
-                pipeline::file_to_ast(&file.path(), command.flags.contains(&Flags::Verbose));
+            let entrypoint_filepath = &file.path();
+            let maybe_ast = pipeline::file_to_ast(
+                &entrypoint_filepath,
+                command.flags.contains(&Flags::Verbose),
+            );
             if let Err(e) = maybe_ast {
                 eprint!("{}", e);
                 std::process::exit(1);
@@ -66,6 +70,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 );
                 continue;
             }
+            // TEMP: handle std lib gen (will use pipeline later)
+            let module_name = entrypoint_filepath
+                .file_stem()
+                .expect(&format!(
+                    "unable to get file stem from filename {:?}",
+                    entrypoint_filepath
+                ))
+                .to_string_lossy();
+            let mut tables = ParsingTables::new();
+            tables.update(&ast, &module_name);
+            let std_lib = codegen_c::identify_std_libs(&tables.types);
+            codegen_c::emit_templated_stdlib_files(&std_lib);
+            // Write file
             let generated_code = codegen_c::write_all(file.path().to_str().unwrap(), ast.iter());
             let new_path = format!(
                 "c_libs/gen_{}",

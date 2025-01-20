@@ -105,6 +105,7 @@ impl<T> ParserOutputExt<T> for ParserOutput<T> {
 
 // -------------------- AST --------------------
 
+/// TODO: map should be tuple inner
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Void,

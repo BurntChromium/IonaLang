@@ -18,9 +18,9 @@ impl ParsingTables {
         }
     }
 
-    pub fn update(&mut self, nodes: &Vec<ASTNode>) {
+    pub fn update(&mut self, nodes: &Vec<ASTNode>, module_name: &str) {
         self.modules.update(nodes);
-        self.types.update(nodes);
+        self.types.update(nodes, module_name);
     }
 }
 
@@ -84,10 +84,15 @@ impl ModuleTable {
     }
 }
 
-/// Track all types declared and used throughout the module
+/// Track all types declared and used throughout the program
+///
+/// All fields except `types_used_by_module` are "global" across the program
+///
+/// `types_used_by_module` tracks which types are *external* to a module so we know what that module has to import
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeTable {
     pub type_list: HashSet<Type>,
+    pub types_used_by_module: HashMap<String, HashSet<Type>>,
     new_structs: HashMap<String, Struct>,
     new_enums: HashMap<String, Enum>,
 }
@@ -96,21 +101,27 @@ impl TypeTable {
     pub fn new() -> TypeTable {
         TypeTable {
             type_list: HashSet::new(),
+            types_used_by_module: HashMap::new(),
             new_structs: HashMap::new(),
             new_enums: HashMap::new(),
         }
     }
 
     // Helper method to process individual statements
-    fn process_statement(&mut self, statement: &Statement) {
+    fn process_statement(
+        &mut self,
+        statement: &Statement,
+        external_type_tracker: &mut HashSet<Type>,
+    ) {
         match statement {
             Statement::VariableDeclaration { type_, .. } => {
                 self.type_list.insert(type_.clone());
+                external_type_tracker.insert(type_.clone());
             }
             Statement::Conditional(branches) => {
                 for branch in branches {
                     for inner_statement in &branch.computations {
-                        self.process_statement(inner_statement);
+                        self.process_statement(inner_statement, external_type_tracker);
                     }
                 }
             }
@@ -120,7 +131,8 @@ impl TypeTable {
     }
 
     /// Walk an AST and build a set of all of the types used
-    pub fn update(&mut self, ast: &Vec<ASTNode>) {
+    pub fn update(&mut self, ast: &Vec<ASTNode>, module_name: &str) {
+        let mut types_used_by_module: HashSet<Type> = HashSet::new();
         for node in ast {
             match node {
                 ASTNode::StructDeclaration(s) => {
@@ -130,6 +142,7 @@ impl TypeTable {
                     self.type_list.insert(Type::Custom(s.name.clone()));
                     for field in s.fields.iter() {
                         self.type_list.insert(field.field_type.clone());
+                        types_used_by_module.insert(field.field_type.clone());
                     }
                 }
                 ASTNode::EnumDeclaration(e) => {
@@ -138,20 +151,24 @@ impl TypeTable {
                     self.type_list.insert(Type::Custom(e.name.clone()));
                     for field in e.fields.iter() {
                         self.type_list.insert(field.field_type.clone());
+                        types_used_by_module.insert(field.field_type.clone());
                     }
                 }
                 ASTNode::FunctionDeclaration(f) => {
                     self.type_list.insert(f.returns.clone());
                     for arg in f.args.iter() {
                         self.type_list.insert(arg.field_type.clone());
+                        types_used_by_module.insert(arg.field_type.clone());
                     }
                     for st in f.statements.iter() {
-                        self.process_statement(st);
+                        self.process_statement(st, &mut types_used_by_module);
                     }
                 }
                 ASTNode::ImportStatement(_) => {}
             }
         }
+        self.types_used_by_module
+            .insert(module_name.to_string(), types_used_by_module);
     }
 }
 
