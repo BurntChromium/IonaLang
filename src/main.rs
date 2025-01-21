@@ -33,7 +33,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             std::process::exit(1);
         }
         let ast = maybe_ast.unwrap();
-        let generated_code = codegen_c::write_all(&file.to_string_lossy(), ast.iter());
+        // TEMP: handle std lib gen (will use pipeline later)
+        let module_name = file
+            .file_stem()
+            .expect(&format!("unable to get file stem from filename {:?}", file))
+            .to_string_lossy();
+        let mut tables = ParsingTables::new();
+        tables.update(&ast, &module_name);
+        let filled_templates = codegen_c::generate_templated_libs(&tables.types);
+        codegen_c::emit_templated_stdlib_files(&filled_templates);
+        // Write file
+        let generated_code =
+            codegen_c::write_all(ast.iter(), &tables.types, file.to_str().unwrap(), true);
         fs::write("gen/test_case.c", generated_code).expect("Unable to write file");
         let t_all = Instant::now();
         // Report on code timings
@@ -80,10 +91,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .to_string_lossy();
             let mut tables = ParsingTables::new();
             tables.update(&ast, &module_name);
-            let std_lib = codegen_c::identify_std_libs(&tables.types);
-            codegen_c::emit_templated_stdlib_files(&std_lib);
+            let filled_templates = codegen_c::generate_templated_libs(&tables.types);
+            codegen_c::emit_templated_stdlib_files(&filled_templates);
             // Write file
-            let generated_code = codegen_c::write_all(file.path().to_str().unwrap(), ast.iter());
+            let generated_code = codegen_c::write_all(
+                ast.iter(),
+                &tables.types,
+                &file.path().file_stem().unwrap().to_string_lossy(),
+                true,
+            );
             let new_path = format!(
                 "c_libs/gen_{}",
                 file.file_name().to_str().unwrap().replace(".iona", ".h")

@@ -17,8 +17,9 @@ Iona is a high-level, imperative programming language with advanced features nor
 
 ### Short Term To Do List
 
-- Create code generation for functions 
 - Get strings working
+    - Codegen works for Iona translation, but the templates need to permit modifying/importing type files (byte_array isn't importing bytes rn)
+- Create code generation for functions 
 - Handle memory management for doubly-nested data structures
 - Support compiler mode arguments (beyond "build")
 - Major perf regression after switching to Paths from Strings

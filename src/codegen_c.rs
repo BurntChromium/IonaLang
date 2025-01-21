@@ -4,6 +4,7 @@
 
 use std::borrow::Cow;
 use std::fs;
+use std::iter::zip;
 
 use crate::aggregation::TypeTable;
 use crate::parser::*;
@@ -21,7 +22,7 @@ pub fn load_c_template(template_name: &str) -> String {
 /// A concrete, monomorphized type
 ///
 /// header_file means the actual .h file, while header_name is the name of that file
-trait TemplateInstance {
+pub trait TemplateInstance {
     fn get_type(&self) -> &Type;
     fn get_name(&self) -> &str;
     fn get_header_file(&self) -> &str;
@@ -105,28 +106,10 @@ impl TemplateInstance for MonomorphizedArray {
 
 // -------------------- Programmatic C Code --------------------
 
-/// Holds names of
-///
-/// - existing libs that we need to import
-///
-/// - bundled data for monomorphized templates
-pub struct StdLibHandler {
-    pre_existing_lib_names: Vec<String>,
-    generated_libs: Vec<Box<dyn TemplateInstance>>,
-}
-
-/// Check the Type Table to see which standard libraries we need
-///
-/// This also emits import headers for generated
-pub fn identify_std_libs(type_table: &TypeTable) -> StdLibHandler {
-    let mut pre_existing_lib_names: Vec<String> = Vec::new();
+pub fn generate_templated_libs(type_table: &TypeTable) -> Vec<Box<dyn TemplateInstance>> {
     let mut generated_libs: Vec<Box<dyn TemplateInstance>> = Vec::new();
     for t in type_table.type_list.iter() {
         match t {
-            Type::String => pre_existing_lib_names.push("gen_strings.h".to_string()),
-            Type::Integer | Type::Float => pre_existing_lib_names.push("numbers.h".to_string()),
-            Type::Byte => pre_existing_lib_names.push("bytes.h".to_string()),
-            Type::Boolean => pre_existing_lib_names.push("stdbool.h".to_string()),
             Type::Array(inner) => {
                 let data = MonomorphizedArray::new(inner);
                 generated_libs.push(Box::new(data));
@@ -134,14 +117,11 @@ pub fn identify_std_libs(type_table: &TypeTable) -> StdLibHandler {
             _ => {}
         }
     }
-    StdLibHandler {
-        pre_existing_lib_names,
-        generated_libs,
-    }
+    generated_libs
 }
 
-pub fn emit_templated_stdlib_files(lib_handler: &StdLibHandler) {
-    for lib in lib_handler.generated_libs.iter() {
+pub fn emit_templated_stdlib_files(generated_libs: &Vec<Box<dyn TemplateInstance>>) {
+    for lib in generated_libs.iter() {
         fs::write(
             format!("c_libs/{}", lib.get_header_name()),
             lib.get_header_file(),
@@ -153,14 +133,60 @@ pub fn emit_templated_stdlib_files(lib_handler: &StdLibHandler) {
     }
 }
 
+/// Check the Type Table to see which standard libraries we need
+fn identify_std_libs(type_table: &TypeTable, filename: &str) -> Vec<String> {
+    let mut pre_existing_lib_names: Vec<String> = Vec::new();
+    let relevant_types = type_table
+        .types_used_by_module
+        .get(filename)
+        .expect(&format!(
+            "creating imports failed for {}, could not find file name in type table",
+            filename
+        ));
+    for t in relevant_types.iter() {
+        match t {
+            Type::String => pre_existing_lib_names.push("gen_strings.h".to_string()),
+            Type::Integer | Type::Float => pre_existing_lib_names.push("numbers.h".to_string()),
+            Type::Byte => pre_existing_lib_names.push("bytes.h".to_string()),
+            Type::Boolean => pre_existing_lib_names.push("stdbool.h".to_string()),
+            Type::Array(inner) => pre_existing_lib_names.push(format!(
+                "gen_{}_array.h",
+                write_fn_arg_type(inner).to_lowercase()
+            )),
+            _ => {}
+        }
+    }
+    pre_existing_lib_names
+}
+
 /// Handles import for core libraries
-///
-/// TODO: actually dynamically handle imports...
-fn write_header(filename: &str) -> String {
-    format!(
-        "// source: {}\n\n#include <stdbool.h>\n#include \"../c_libs/numbers.h\"\n\n",
-        filename
-    )
+fn write_header(type_table: &TypeTable, filename: &str, is_stdlib: bool) -> String {
+    let relevant_types = type_table
+        .types_used_by_module
+        .get(filename)
+        .expect(&format!(
+            "creating imports failed for {}, could not find file name in type table",
+            filename
+        ));
+    let mut buffer = format!("// source: {}\n\n", filename);
+    for (t, i) in zip(relevant_types, identify_std_libs(type_table, filename)) {
+        // If we're creating a stdlib file, then we're all in the same folder
+        if is_stdlib {
+            buffer.push_str(&format!("#include \"{}\";\n", i));
+        } else {
+            // If we're creating a user file, then stdlib files are in a parallel folder and custom files are in this directory
+            match t {
+                Type::Custom(_) => {
+                    buffer.push_str(&format!("#include \"{}\";\n", i));
+                }
+                _ => {
+                    buffer.push_str(&format!("#include ../c_libs/\"{}\";\n", i));
+                }
+            }
+        }
+        buffer += "\n";
+    }
+    buffer
 }
 
 /// Handles user defined imports
@@ -270,12 +296,14 @@ fn write_fn_declare(input: &Function) -> String {
     buffer
 }
 
+// -------------------- All Together --------------------
+
 /// Write an AST to a string
-pub fn write_all<'ast, I>(filename: &str, ast: I) -> String
+pub fn write_all<'ast, I>(ast: I, type_table: &TypeTable, filename: &str, is_stdlib: bool) -> String
 where
     I: Iterator<Item = &'ast ASTNode>,
 {
-    let mut buffer = write_header(filename);
+    let mut buffer = write_header(type_table, filename, is_stdlib);
     for node in ast {
         match node {
             ASTNode::EnumDeclaration(e) => {
