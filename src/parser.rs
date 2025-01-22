@@ -11,6 +11,13 @@ pub struct ParserMetadata {
     pub filename: String,
 }
 
+/// We use a new Parser for each file 
+/// 
+/// A Parser receives tokens from a lexer, and tracks its index within the token stream using the `offset` variable to allow for easier lookahead/rollbacks (inspired by Apache Kafka)
+/// 
+/// The `recursion_counter` prevents the parser from getting stuck in certain operations 
+/// 
+/// The `trace` holds a list of log messages identifying the order of operations (for debugging)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parser {
     tokens: Vec<Token>,
@@ -52,6 +59,7 @@ impl<T> ParserOutput<T> {
     }
 }
 
+/// A utility trait for chaining together certain parsing operations
 pub trait ParserOutputExt<T> {
     fn and_then<U, F>(self, f: F) -> ParserOutput<U>
     where
@@ -105,7 +113,7 @@ impl<T> ParserOutputExt<T> for ParserOutput<T> {
 
 // -------------------- AST --------------------
 
-/// TODO: map should be tuple inner
+/// TODO: the inner type of the Map should be a tuple
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Void,
@@ -142,23 +150,25 @@ pub struct Field {
     pub field_type: Type,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub name: String,
     pub fields: Vec<Field>,
     pub properties: Vec<DataProperties>,
     pub traits: Vec<DataTraits>,
+    pub methods: Vec<Function>
 }
 
 /// An enum has the same shape as a struct but different rules
 ///
 /// For clarity I separate the types, even though they're functionally identical
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Enum {
     pub name: String,
     pub fields: Vec<Field>,
     pub properties: Vec<DataProperties>,
     pub traits: Vec<DataTraits>,
+    pub methods: Vec<Function>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -449,6 +459,7 @@ impl Parser {
                 fields,
                 properties,
                 traits,
+                methods: Vec::new()
             })
         })
         .and_then(|struct_| {
@@ -519,6 +530,7 @@ impl Parser {
                 fields,
                 properties,
                 traits,
+                methods: Vec::new()
             })
         })
         .and_then(|enum_| {
