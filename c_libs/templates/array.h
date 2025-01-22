@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 <OTHER_IMPORTS>
-
 typedef struct {
     ELEM_TYPE* data;
     size_t len;
@@ -68,8 +67,7 @@ void PREFIX_push(ARRAY_NAME* arr, ELEM_TYPE elem) {
 // Pop an element from the end
 ELEM_TYPE PREFIX_pop(ARRAY_NAME* arr) {
     if (arr->len == 0) {
-        // Handle empty array - could return sentinel value,
-        // or add error handling based on your language's needs
+        // TODO: use Result type
         ELEM_TYPE zero = {0};  // Zero initialization works for most types
         return zero;
     }
@@ -93,8 +91,7 @@ ARRAY_NAME PREFIX_slice(const ARRAY_NAME* arr, size_t start, size_t end) {
 // Get element at index (bounds checking optional based on your language's semantics)
 ELEM_TYPE PREFIX_get(const ARRAY_NAME* arr, size_t index) {
     if (index >= arr->len) {
-        // Handle out of bounds - could return sentinel value,
-        // or add error handling based on your language's needs
+        // Handle out of bounds - TODO: use Result type
         ELEM_TYPE zero = {0};
         return zero;
     }

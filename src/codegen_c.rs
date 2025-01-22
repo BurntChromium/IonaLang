@@ -149,7 +149,7 @@ fn type_to_std_lib(type_: &Type) -> Option<String> {
         Type::String => Some("gen_strings.h".to_string()),
         Type::Integer | Type::Float => Some("numbers.h".to_string()),
         Type::Byte => Some("bytes.h".to_string()),
-        Type::Boolean => Some("stdbool.h".to_string()),
+        Type::Boolean => Some("<stdbool.h>".to_string()),
         Type::Array(inner) => Some(format!(
             "gen_{}_array.h",
             write_fn_arg_type(inner).to_lowercase()
@@ -165,8 +165,8 @@ fn identify_std_libs(type_table: &TypeTable, filename: &str) -> Vec<String> {
         .types_used_by_module
         .get(filename)
         .expect(&format!(
-            "creating imports failed for {}, could not find file name in type table",
-            filename
+            "creating imports failed for {}, could not find file name in type table\nTable:\n{:?}",
+            filename, type_table.types_used_by_module
         ));
     for t in relevant_types.iter() {
         if let Some(h) = type_to_std_lib(t) {
@@ -182,14 +182,14 @@ fn write_header(type_table: &TypeTable, filename: &str, is_stdlib: bool) -> Stri
         .types_used_by_module
         .get(filename)
         .expect(&format!(
-            "creating imports failed for {}, could not find file name in type table",
-            filename
+            "creating imports failed for {}, could not find file name in type table\nTable:\n{:?}",
+            filename, type_table.types_used_by_module
         ));
     let mut buffer = format!("// source: {}\n\n", filename);
     for (t, i) in zip(relevant_types, identify_std_libs(type_table, filename)) {
         // If we're creating a stdlib file, then we're all in the same folder
         if is_stdlib {
-            buffer.push_str(&format!("#include \"{}\"\n", i));
+            buffer.push_str(&format!("#include \"{}\"", i));
         } else {
             // If we're creating a user file, then stdlib files are in a parallel folder and custom files are in this directory
             match t {
@@ -197,12 +197,20 @@ fn write_header(type_table: &TypeTable, filename: &str, is_stdlib: bool) -> Stri
                     buffer.push_str(&format!("#include \"{}\"\n", i));
                 }
                 _ => {
-                    buffer.push_str(&format!("#include ../c_libs/\"{}\"\n", i));
+                    // Actual C stdlib
+                    if i.starts_with('<') && i.ends_with('>') {
+                        buffer.push_str(&format!("#include {}", i));
+                    } else {
+                        // Some C file we wrote
+                        buffer.push_str(&format!("#include \"../c_libs/{}\"", i));
+                    }
                 }
             }
         }
         buffer += "\n";
     }
+    // Extra newline for separating imports from rest of file
+    buffer += "\n";
     buffer
 }
 

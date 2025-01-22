@@ -43,8 +43,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         let filled_templates = codegen_c::generate_templated_libs(&tables.types);
         codegen_c::emit_templated_stdlib_files(&filled_templates);
         // Write file
-        let generated_code =
-            codegen_c::write_all(ast.iter(), &tables.types, file.to_str().unwrap(), true);
+        let generated_code = codegen_c::write_all(
+            ast.iter(),
+            &tables.types,
+            &file.file_stem().unwrap().to_string_lossy(),
+            false,
+        );
         fs::write("gen/test_case.c", generated_code).expect("Unable to write file");
         let t_all = Instant::now();
         // Report on code timings

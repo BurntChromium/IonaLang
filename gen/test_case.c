@@ -1,8 +1,7 @@
-// source: test_programs/comprehensive.iona
+// source: struct
 
 #include <stdbool.h>
 #include "../c_libs/numbers.h"
-
 struct Animal {
 	Integer legs;
 	bool hair;
@@ -10,21 +9,3 @@ struct Animal {
 };
 typedef struct Animal Animal;
 
-typedef enum {
-	DOG,
-	FISH,
-	BIRD,
-	CAT,
-} PetsStates;
-
-typedef union {
-	Integer Cat;
-} PetsValues;
-
-struct Pets {
-	PetsStates tag;
-	PetsValues data;
-};
-typedef struct Pets Pets;
-
-void print_pet(Pets pet);
