@@ -44,7 +44,10 @@ struct MonomorphizedArray {
 /// `type_method_prefix`: byte_array or int_array
 ///
 /// `c_type`: the underlying c type (or the appropriate new type defined in C like `Integer` or `Float`)
+///
+/// `other_imports`: what other modules do we need to make this array work?
 fn monomorphize_array_template(
+    inner_type: &Type,
     template: &str,
     array_type_name: &str,
     type_method_prefix: &str,
@@ -52,10 +55,16 @@ fn monomorphize_array_template(
 ) -> String {
     let elem_type = c_type;
     let prefix = type_method_prefix;
+    // TODO: support nested types, this will require a loop and/or recursion
+    let imports = match type_to_std_lib(&inner_type) {
+        Some(t) => &format!("#include \"{}\"\n", t),
+        None => "",
+    };
     template
         .replace("ARRAY_NAME", &array_type_name)
         .replace("ELEM_TYPE", elem_type)
         .replace("PREFIX", prefix)
+        .replace("<OTHER_IMPORTS>", imports)
 }
 
 /// TODO: make recursive
@@ -70,6 +79,7 @@ impl MonomorphizedArray {
     fn new(type_: &Type) -> MonomorphizedArray {
         let template = load_c_template("array.h");
         let header_file = monomorphize_array_template(
+            type_,
             &template,
             &format!("{}Array", write_fn_arg_type(type_)),
             &format!("{}_array", write_fn_arg_type(type_).to_lowercase()),
@@ -133,6 +143,21 @@ pub fn emit_templated_stdlib_files(generated_libs: &Vec<Box<dyn TemplateInstance
     }
 }
 
+/// Input a type and receive the name of the header file which implements it
+fn type_to_std_lib(type_: &Type) -> Option<String> {
+    match type_ {
+        Type::String => Some("gen_strings.h".to_string()),
+        Type::Integer | Type::Float => Some("numbers.h".to_string()),
+        Type::Byte => Some("bytes.h".to_string()),
+        Type::Boolean => Some("stdbool.h".to_string()),
+        Type::Array(inner) => Some(format!(
+            "gen_{}_array.h",
+            write_fn_arg_type(inner).to_lowercase()
+        )),
+        _ => None,
+    }
+}
+
 /// Check the Type Table to see which standard libraries we need
 fn identify_std_libs(type_table: &TypeTable, filename: &str) -> Vec<String> {
     let mut pre_existing_lib_names: Vec<String> = Vec::new();
@@ -144,16 +169,8 @@ fn identify_std_libs(type_table: &TypeTable, filename: &str) -> Vec<String> {
             filename
         ));
     for t in relevant_types.iter() {
-        match t {
-            Type::String => pre_existing_lib_names.push("gen_strings.h".to_string()),
-            Type::Integer | Type::Float => pre_existing_lib_names.push("numbers.h".to_string()),
-            Type::Byte => pre_existing_lib_names.push("bytes.h".to_string()),
-            Type::Boolean => pre_existing_lib_names.push("stdbool.h".to_string()),
-            Type::Array(inner) => pre_existing_lib_names.push(format!(
-                "gen_{}_array.h",
-                write_fn_arg_type(inner).to_lowercase()
-            )),
-            _ => {}
+        if let Some(h) = type_to_std_lib(t) {
+            pre_existing_lib_names.push(h);
         }
     }
     pre_existing_lib_names
@@ -172,15 +189,15 @@ fn write_header(type_table: &TypeTable, filename: &str, is_stdlib: bool) -> Stri
     for (t, i) in zip(relevant_types, identify_std_libs(type_table, filename)) {
         // If we're creating a stdlib file, then we're all in the same folder
         if is_stdlib {
-            buffer.push_str(&format!("#include \"{}\";\n", i));
+            buffer.push_str(&format!("#include \"{}\"\n", i));
         } else {
             // If we're creating a user file, then stdlib files are in a parallel folder and custom files are in this directory
             match t {
                 Type::Custom(_) => {
-                    buffer.push_str(&format!("#include \"{}\";\n", i));
+                    buffer.push_str(&format!("#include \"{}\"\n", i));
                 }
                 _ => {
-                    buffer.push_str(&format!("#include ../c_libs/\"{}\";\n", i));
+                    buffer.push_str(&format!("#include ../c_libs/\"{}\"\n", i));
                 }
             }
         }

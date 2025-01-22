@@ -2,9 +2,13 @@
 // ARRAY_NAME -> concrete type name (e.g., StringArray, IntArray)
 // ELEM_TYPE -> concrete element type (e.g., char, int)
 // PREFIX -> function prefix (e.g., string_array, int_array)
+// OTHER_IMPORTS -> what other packages do we need?
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+<OTHER_IMPORTS>
 
 typedef struct {
     ELEM_TYPE* data;
