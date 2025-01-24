@@ -11,12 +11,12 @@ pub struct ParserMetadata {
     pub filename: String,
 }
 
-/// We use a new Parser for each file 
-/// 
+/// We use a new Parser for each file
+///
 /// A Parser receives tokens from a lexer, and tracks its index within the token stream using the `offset` variable to allow for easier lookahead/rollbacks (inspired by Apache Kafka)
-/// 
-/// The `recursion_counter` prevents the parser from getting stuck in certain operations 
-/// 
+///
+/// The `recursion_counter` prevents the parser from getting stuck in certain operations
+///
 /// The `trace` holds a list of log messages identifying the order of operations (for debugging)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parser {
@@ -117,6 +117,7 @@ impl<T> ParserOutputExt<T> for ParserOutput<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Void,
+    Self_,
     Integer,
     Float,
     String,
@@ -156,7 +157,7 @@ pub struct Struct {
     pub fields: Vec<Field>,
     pub properties: Vec<DataProperties>,
     pub traits: Vec<DataTraits>,
-    pub methods: Vec<Function>
+    pub methods: Vec<Function>,
 }
 
 /// An enum has the same shape as a struct but different rules
@@ -168,7 +169,7 @@ pub struct Enum {
     pub fields: Vec<Field>,
     pub properties: Vec<DataProperties>,
     pub traits: Vec<DataTraits>,
-    pub methods: Vec<Function>
+    pub methods: Vec<Function>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,8 +190,8 @@ pub enum FunctionProperties {
 pub enum FunctionPermissions {
     ReadFile,
     WriteFile,
-    ReadIO,
-    WriteIO,
+    ReadConsole,
+    WriteConsole,
     HTTPAny,
     HTTPGet,
     HTTPPost,
@@ -431,6 +432,12 @@ impl Parser {
     fn parse_field_mandatory_type(&mut self) -> ParserOutput<Field> {
         self.add_trace("parse a field that has a mandatory type");
         self.then_identifier().and_then(|name| {
+            if name == "self" {
+                return ParserOutput::okay(Field {
+                    name,
+                    field_type: Type::Self_,
+                });
+            }
             self.with_whitespace(|p| p.then_ignore(Symbol::Colon))
                 .and_then(|_| self.with_whitespace(|p| p.parse_type()))
                 .map(|type_| Field {
@@ -447,6 +454,7 @@ impl Parser {
             return name.transmute_error::<Struct>();
         }
         let struct_name = name.output.clone().unwrap();
+
         name.and_then(|_| {
             self.parse_list_comma_separated(|p| {
                 p.with_whitespace(|p| p.parse_field_mandatory_type())
@@ -454,13 +462,18 @@ impl Parser {
         })
         .and_then(|fields| {
             let metadata = self.parse_metadata_data_types();
-            metadata.map(|(properties, traits)| Struct {
-                name: struct_name,
-                fields,
-                properties,
-                traits,
-                methods: Vec::new()
-            })
+            metadata.map(|(properties, traits)| (fields, properties, traits))
+        })
+        .and_then(|(fields, properties, traits)| {
+            // Parse any methods before the closing brace
+            self.parse_list_newline_separated(|p| p.parse_function())
+                .map(|methods| Struct {
+                    name: struct_name,
+                    fields,
+                    properties,
+                    traits,
+                    methods,
+                })
         })
         .and_then(|struct_| {
             self.with_whitespace(|p| p.then_ignore(Symbol::BraceClose))
@@ -530,7 +543,7 @@ impl Parser {
                 fields,
                 properties,
                 traits,
-                methods: Vec::new()
+                methods: Vec::new(),
             })
         })
         .and_then(|enum_| {
@@ -636,8 +649,8 @@ impl Parser {
         self.then_identifier().and_then(|name| match name.as_str() {
             "ReadFile" => ParserOutput::okay(FunctionPermissions::ReadFile),
             "WriteFile" => ParserOutput::okay(FunctionPermissions::WriteFile),
-            "ReadIO" => ParserOutput::okay(FunctionPermissions::ReadIO),
-            "WriteIO" => ParserOutput::okay(FunctionPermissions::WriteIO),
+            "ReadConsole" => ParserOutput::okay(FunctionPermissions::ReadConsole),
+            "WriteConsole" => ParserOutput::okay(FunctionPermissions::WriteConsole),
             "HTTPAny" => ParserOutput::okay(FunctionPermissions::HTTPAny),
             "HTTPGet" => ParserOutput::okay(FunctionPermissions::HTTPGet),
             "HTTPPost" => ParserOutput::okay(FunctionPermissions::HTTPPost),
@@ -1547,6 +1560,52 @@ mod tests {
         let expected = Type::Generic("T".to_string());
         assert!(out.output.is_some());
         assert_eq!(out.output.unwrap(), expected);
+    }
+
+    #[test]
+    fn parse_struct() {
+        let program_text = r#"struct Animal {
+            legs: Int,
+            hair: Bool,
+            feathers: Bool
+            
+            @metadata {
+                Is: Public;
+                Derives: Eq, Show;
+            }
+
+            fn print(self) -> Void {
+                @metadata {
+                    Is: Public;
+                    Uses: WriteConsole;
+                }
+                let output: String = "";
+                output.concat(self.legs.to_str());
+                print(output);
+            }
+        }"#;
+        // Lex
+        let mut lexer = Lexer::new("test");
+        lexer.lex(&program_text);
+        // Parse
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_struct();
+        println!("{:#?}", parser.trace);
+        for d in out.diagnostics.iter() {
+            eprint!("{}", d.display(program_text));
+        }
+        assert!(out.output.is_some());
+        let s = out.output.unwrap();
+        assert_eq!(s.name, "Animal");
+        assert_eq!(s.fields.len(), 3);
+        assert_eq!(s.properties, vec![DataProperties::Public]);
+        assert_eq!(s.traits, vec![DataTraits::Eq, DataTraits::Show]);
+        assert_eq!(s.methods.len(), 1);
+        let f = s.methods[0].clone();
+        assert_eq!(f.name, "print");
+        assert_eq!(f.returns, Type::Void);
+        assert_eq!(f.properties, vec![FunctionProperties::Public]);
+        assert_eq!(f.permissions, vec![FunctionPermissions::WriteConsole]);
     }
 
     #[test]

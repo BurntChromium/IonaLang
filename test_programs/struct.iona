@@ -7,4 +7,14 @@ struct Animal {
 		Is: Public;
 		Derives: Eq, Show;
 	}
+
+	fn print(self) -> Void {
+		@metadata {
+			Is: Public;
+			Uses: WriteConsole;
+		}
+		let output: String = "";
+		output.concat(self.legs.to_str());
+		print(output);
+	}
 }

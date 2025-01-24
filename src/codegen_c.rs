@@ -314,8 +314,8 @@ fn write_fn_declare(input: &Function) -> String {
         buffer += &format!("{} {}, ", write_fn_arg_type(&arg.field_type), arg.name);
     }
     // Remove the trailing `, `
-    buffer.pop();
-    buffer.pop();
+    buffer.pop(); // pop comma
+    buffer.pop(); // pop space
     buffer.push(')');
     buffer.push(';');
     buffer
