@@ -10,7 +10,7 @@ Iona is a high-level, imperative programming language with advanced features nor
 - Parser: done
 - Static analysis
     - Type usage: in progress
-    - Module/Import resolver: in progress'
+    - Module/Import resolver: in progress
     - Typechecking: to do
 - Basic codegen: in progress
 - C runtime: to do
@@ -20,9 +20,9 @@ Iona is a high-level, imperative programming language with advanced features nor
 - Get strings working
     - Codegen works for Iona translation, but the templates need to permit modifying/importing type files (byte_array isn't importing bytes rn)
 - Create code generation for functions 
-- Handle memory management for doubly-nested data structures
+- Handle memory management for doubly-nested (or deeper?) data structures
 - Support compiler mode arguments (beyond "build")
-- Major perf regression after switching to Paths from Strings
+- Major perf regression after switching to Paths from Strings (compiler perf loss)
 
 ## Language Features
 
