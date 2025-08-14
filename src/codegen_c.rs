@@ -29,7 +29,7 @@ pub trait TemplateInstance {
     fn get_header_name(&self) -> &str;
 }
 
-/// TODO: extend this to handle doubly-nested types (Array<Array<Byte>> or Array<Map<String, T>> or whatever)
+/// TODO: extend this to handle doubly-nested types (`Array<Array<Byte>>` or `Array<Map<String, T>>` or whatever)
 struct MonomorphizedArray {
     type_: Type,
     name: String,

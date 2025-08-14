@@ -3,6 +3,7 @@
 use std::error::Error;
 use std::path::Path;
 
+/// What mode should the compiler be run on?
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Build,
@@ -10,24 +11,28 @@ pub enum Mode {
     Test,
 }
 
+/// What should be compiled -- the standard library or an Iona file?
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     StdLib,
     Entrypoint(Box<Path>),
 }
 
+/// What flags can be passed to the compiler?
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Flags {
     SingleFile,
     Verbose,
 }
 
+/// Encapsulate the various options into a single command
 pub struct Command {
     pub mode: Mode,
     pub target: Target,
     pub flags: Vec<Flags>,
 }
 
+/// Parse the command line string into a single command
 pub fn parse_args(args: &Vec<String>) -> Result<Command, Box<dyn Error>> {
     if args.len() < 2 {
         return Err("you must pass at least 1 argument to the compiler".into());

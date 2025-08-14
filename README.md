@@ -53,3 +53,19 @@ Iona supports contracts: runtime checks to prevent a program from entering an in
 The goal of contracts is to try and catch potential runtime errors at compile time. Suppose you have a division function. You could always manually check in the body that denominator != 0, but if you make it a contract the compiler can warn you ahead of time about runtime problems based on the inputs you provide. For instance, when composing functions we can check that the post conditions of the inner function are at least as strict as the pre conditions of outer function.
 
 At least with pre- and post- conditions this is the same idea as [refinement types](https://en.wikipedia.org/wiki/Refinement_type), like Liquid Haskell.
+
+## Compiler Usage
+
+If you've cloned the repo, commands can be forwarded through `cargo run`.
+
+```sh
+cargo run ____
+```
+
+For example, to build Iona's standard library you can run
+
+```sh
+cargo run build stdlib
+```
+
+Other options are part of the `cli.rs` file (and its associated cargo docs).s
