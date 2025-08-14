@@ -30,7 +30,7 @@ Iona is a high-level, imperative programming language with advanced features nor
 
 Iona has an effects system aimed at improving supply chain security and program correctness. 
 
-Explicit, opt-in permissions are required for functions to use "side effects" (like file i/o, network i/o, and so on). This requirement, plus (forthcoming) tooling to make auditing these permissions easy, would reduce the risk of malicious packages masquerading as harmless packages. For instance, a function with the type signature and permission set below should raise some eyebrows.
+Explicit, opt-in permissions are required for functions to use "side effects" (like file i/o, network i/o, and so on). This requirement, plus (forthcoming) tooling to make auditing these permissions easy, would reduce the risk of malicious packages masquerading as harmless packages. It also reduces the risk of untested (or insufficiently tested) AI generated code. For instance, a function with the type signature and permission set below should raise some eyebrows.
 
 ```rust
 fn foo(a: Int, b: Int) -> Int {
