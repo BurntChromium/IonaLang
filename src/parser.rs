@@ -1169,6 +1169,12 @@ impl Parser {
         self.add_trace("parse a function");
         let mut diagnostics = Vec::new();
 
+        // If it doesn't start with 'fn', bail without consuming anything
+        // Added to support parsing methods (inside structs) -- the parser was too "eager" it would "eat" the closing brace which broke the struct parser
+        if self.peek().symbol != Symbol::Function {
+            return ParserOutput::err(diagnostics); // no diagnostics, just "not a function"
+        }
+
         // Parse the function declaration
         let declaration = match self.parse_function_declaration() {
             ParserOutput {
