@@ -414,9 +414,9 @@ fn main() -> Void {
         let t2 = Type::Array(Box::new(Type::Array(Box::new(Type::String))));
         assert_eq!(boxed_type_name(&t2), "StringArrayArray");
 
-        let t3 = Type::Array(Box::new(Type::Array(Box::new(Type::Array(
-            Box::new(Type::Boolean),
-        )))));
+        let t3 = Type::Array(Box::new(Type::Array(Box::new(Type::Array(Box::new(
+            Type::Boolean,
+        ))))));
         assert_eq!(boxed_type_name(&t3), "boolArrayArrayArray");
     }
 }

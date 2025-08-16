@@ -35,7 +35,7 @@ impl ParsingTables {
 /// - `exported_items` tracks all things marked as Export within a file
 ///
 /// If the `imported_items` and the `exported_items` don't align, then we've got a problem!
-/// 
+///
 /// TODO: module table seems to fail on functions, my guess is that the parser itself chokes. Look into later.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModuleTable {
