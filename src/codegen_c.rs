@@ -361,3 +361,62 @@ where
     }
     buffer
 }
+
+// -------------------- Unit Tests --------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::aggregation::TypeTable;
+    use crate::lexer::Lexer;
+    use crate::parser::Parser;
+
+    #[test]
+    fn monomorphize_nested_arrays() {
+        const PROGRAM: &'static str = r#"
+fn main() -> Void {
+    let x: Array<Int>;
+    let y: Array<Array<String>>;
+    let z: Array<Array<Array<Bool>>>;
+}
+"#;
+        let mut lexer = Lexer::new("test.iona");
+        lexer.lex(PROGRAM);
+        let mut parser = Parser::new(lexer.token_stream);
+        let out = parser.parse_all();
+        assert!(out.output.is_some());
+        let ast = out.output.unwrap();
+
+        let mut type_table = TypeTable::new();
+        type_table.update(&ast, "test.iona");
+
+        let generated_libs = generate_templated_libs(&type_table);
+
+        assert_eq!(generated_libs.len(), 6);
+        let names: HashSet<String> = generated_libs
+            .iter()
+            .map(|lib| lib.get_header_name().to_string())
+            .collect();
+        // Check for all expected monomorphizations
+        assert!(names.contains("gen_integer_array.h"));
+        assert!(names.contains("gen_string_array.h"));
+        assert!(names.contains("gen_stringarray_array.h"));
+        assert!(names.contains("gen_bool_array.h"));
+        assert!(names.contains("gen_boolarray_array.h"));
+        assert!(names.contains("gen_boolarrayarray_array.h"));
+    }
+
+    #[test]
+    fn boxed_type_naming() {
+        let t1 = Type::Array(Box::new(Type::Integer));
+        assert_eq!(boxed_type_name(&t1), "IntegerArray");
+
+        let t2 = Type::Array(Box::new(Type::Array(Box::new(Type::String))));
+        assert_eq!(boxed_type_name(&t2), "StringArrayArray");
+
+        let t3 = Type::Array(Box::new(Type::Array(Box::new(Type::Array(
+            Box::new(Type::Boolean),
+        )))));
+        assert_eq!(boxed_type_name(&t3), "boolArrayArrayArray");
+    }
+}
