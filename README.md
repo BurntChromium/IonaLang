@@ -10,7 +10,7 @@ Iona is a high-level, imperative programming language with advanced features nor
 - Parser: done
 - Static analysis
     - Type usage: in progress
-    - Module/Import resolver: in progress
+    - Module/Import resolver: done, except for a bug (I think in the parser)
     - Typechecking: to do
 - Basic codegen: in progress
 - C runtime: to do
