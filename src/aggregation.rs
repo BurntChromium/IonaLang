@@ -3,7 +3,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use crate::parser::{ASTNode, Enum, Statement, Struct, Type};
+use crate::parser::{ASTNode, DataProperties, Enum, FunctionProperties, Statement, Struct, Type};
 
 pub struct ParsingTables {
     pub modules: ModuleTable,
@@ -19,7 +19,7 @@ impl ParsingTables {
     }
 
     pub fn update(&mut self, nodes: &Vec<ASTNode>, module_name: &str) {
-        self.modules.update(nodes);
+        self.modules.update(nodes, module_name);
         self.types.update(nodes, module_name);
     }
 }
@@ -53,7 +53,7 @@ impl ModuleTable {
         }
     }
 
-    pub fn update(&mut self, ast: &Vec<ASTNode>) {
+    pub fn update(&mut self, ast: &Vec<ASTNode>, module_name: &str) {
         for node in ast {
             match node {
                 ASTNode::ImportStatement(i) => {
@@ -73,11 +73,48 @@ impl ModuleTable {
                         }
                     }
                 }
-                // ASTNode::EnumDeclaration(e) => {
-                //     if e.properties.contains(&DataProperties::Export) => {
-                //         match self.exported_items.entry(key)
-                //     }
-                // }
+                ASTNode::EnumDeclaration(e) => {
+                    if e.properties.contains(&DataProperties::Export) {
+                        self.exported_items
+                            .entry(module_name.to_string())
+                            .or_insert_with(HashSet::new)
+                            .insert(e.name.clone());
+                    }
+                    if e.properties.contains(&DataProperties::Public) {
+                        self.public_items
+                            .entry(module_name.to_string())
+                            .or_insert_with(HashSet::new)
+                            .insert(e.name.clone());
+                    }
+                }
+                ASTNode::StructDeclaration(s) => {
+                    if s.properties.contains(&DataProperties::Export) {
+                        self.exported_items
+                            .entry(module_name.to_string())
+                            .or_insert_with(HashSet::new)
+                            .insert(s.name.clone());
+                    }
+                    if s.properties.contains(&DataProperties::Public) {
+                        self.public_items
+                            .entry(module_name.to_string())
+                            .or_insert_with(HashSet::new)
+                            .insert(s.name.clone());
+                    }
+                }
+                ASTNode::FunctionDeclaration(f) => {
+                    if f.properties.contains(&FunctionProperties::Export) {
+                        self.exported_items
+                            .entry(module_name.to_string())
+                            .or_insert_with(HashSet::new)
+                            .insert(f.name.clone());
+                    }
+                    if f.properties.contains(&FunctionProperties::Public) {
+                        self.public_items
+                            .entry(module_name.to_string())
+                            .or_insert_with(HashSet::new)
+                            .insert(f.name.clone());
+                    }
+                }
                 _ => {}
             }
         }
@@ -203,7 +240,7 @@ mod tests {
         assert!(out.diagnostics.is_empty());
         println!("{:#?}", &out.output);
         let mut import_table = ModuleTable::new();
-        import_table.update(&out.output.unwrap());
+        import_table.update(&out.output.unwrap(), "test.iona");
         println!("{:#?}", import_table);
         assert!(import_table.parsing_status.contains_key("npc"));
         assert_eq!(*import_table.parsing_status.get("npc").unwrap(), false);
