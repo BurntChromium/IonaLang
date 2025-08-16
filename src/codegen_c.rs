@@ -390,6 +390,8 @@ fn main() -> Void {
         let mut type_table = TypeTable::new();
         type_table.update(&ast, "test.iona");
 
+        println!("{:#?}", type_table);
+
         let generated_libs = generate_templated_libs(&type_table);
 
         assert_eq!(generated_libs.len(), 6);
