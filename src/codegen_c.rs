@@ -3,6 +3,7 @@
 //! Note: we don't lift the type writing into a function because it's somewhat context dependent (ex. strings cannot have Void types but Enums can)
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fs;
 use std::iter::zip;
 
@@ -29,7 +30,6 @@ pub trait TemplateInstance {
     fn get_header_name(&self) -> &str;
 }
 
-/// TODO: extend this to handle doubly-nested types (`Array<Array<Byte>>` or `Array<Map<String, T>>` or whatever)
 struct MonomorphizedArray {
     type_: Type,
     name: String,
@@ -67,11 +67,11 @@ fn monomorphize_array_template(
         .replace("<OTHER_IMPORTS>", imports)
 }
 
-/// TODO: make recursive
+/// Create the C-side name for a given type, handling nested types recursively
 fn boxed_type_name(type_: &Type) -> String {
     match type_ {
-        Type::Array(inner) => format!("{}Array", write_fn_arg_type(inner)),
-        _ => todo!(),
+        Type::Array(inner) => format!("{}Array", boxed_type_name(inner)),
+        _ => write_fn_arg_type(type_).to_string(),
     }
 }
 
@@ -118,15 +118,26 @@ impl TemplateInstance for MonomorphizedArray {
 
 pub fn generate_templated_libs(type_table: &TypeTable) -> Vec<Box<dyn TemplateInstance>> {
     let mut generated_libs: Vec<Box<dyn TemplateInstance>> = Vec::new();
-    for t in type_table.type_list.iter() {
-        match t {
-            Type::Array(inner) => {
-                let data = MonomorphizedArray::new(inner);
-                generated_libs.push(Box::new(data));
-            }
-            _ => {}
+
+    fn collect_array_types(t: &Type, set: &mut HashSet<Type>) {
+        if let Type::Array(inner) = t {
+            set.insert(t.clone());
+            collect_array_types(inner, set);
         }
     }
+
+    let mut all_array_types = HashSet::new();
+    for t in type_table.type_list.iter() {
+        collect_array_types(t, &mut all_array_types);
+    }
+
+    for t in all_array_types {
+        if let Type::Array(inner) = t {
+            let data = MonomorphizedArray::new(&inner);
+            generated_libs.push(Box::new(data));
+        }
+    }
+
     generated_libs
 }
 
