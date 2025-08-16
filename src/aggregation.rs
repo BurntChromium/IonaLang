@@ -228,6 +228,22 @@ mod tests {
                 Derives: Eq, Show;
             }
         }
+
+        fn do_nothing()
+            @metadata {
+                Is: Public;
+            }
+        {
+        }
+
+        enum Status {
+            Alive,
+            Dead
+
+            @metadata {
+                Is: Export;
+            }
+        }
     "#;
 
     #[test]
@@ -237,13 +253,26 @@ mod tests {
         let mut parser = Parser::new(lexer.token_stream);
         let out = parser.parse_all();
         assert!(out.diagnostics.is_empty());
-        println!("{:#?}", &out.output);
-        let mut import_table = ModuleTable::new();
-        import_table.update(&out.output.unwrap(), "test.iona");
-        println!("{:#?}", import_table);
-        assert!(import_table.parsing_status.contains_key("npc"));
-        assert_eq!(*import_table.parsing_status.get("npc").unwrap(), false);
-        // assert!(!import_table.imported_items.get("").unwrap().is_empty());
-        // assert_eq!(import_table.imported_items, vec!["Creature".to_string()]);
+        let mut module_table = ModuleTable::new();
+        module_table.update(&out.output.unwrap(), "test.iona");
+
+        // Test import tracking
+        assert!(module_table.parsing_status.contains_key("npc"));
+        assert_eq!(*module_table.parsing_status.get("npc").unwrap(), false);
+        let imported = module_table.imported_items.get("npc").unwrap();
+        assert!(imported.contains("Creature"));
+        assert_eq!(imported.len(), 1);
+
+        // Test export tracking
+        let exported = module_table.exported_items.get("test.iona").unwrap();
+        assert!(exported.contains("Animal"));
+        assert!(exported.contains("Status"));
+        assert_eq!(exported.len(), 2);
+
+        // Test public tracking
+        let public = module_table.public_items.get("test.iona").unwrap();
+        assert!(public.contains("Animal"));
+        assert!(public.contains("do_nothing"));
+        assert_eq!(public.len(), 2);
     }
 }
