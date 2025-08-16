@@ -229,15 +229,16 @@ mod tests {
             }
         }
 
-        fn do_nothing() {
+        fn do_nothing()
             @metadata {
                 Is: Public;
             }
+        {
         }
 
         enum Status {
             Alive,
-            Dead
+            Dead,
 
             @metadata {
                 Is: Export;
