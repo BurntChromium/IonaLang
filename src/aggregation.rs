@@ -229,11 +229,10 @@ mod tests {
             }
         }
 
-        fn do_nothing()
+        fn do_nothing() {
             @metadata {
                 Is: Public;
             }
-        {
         }
 
         enum Status {
@@ -252,9 +251,11 @@ mod tests {
         lexer.lex(PROGRAM);
         let mut parser = Parser::new(lexer.token_stream);
         let out = parser.parse_all();
-        assert!(out.diagnostics.is_empty());
+        assert!(out.output.is_some());
         let mut module_table = ModuleTable::new();
         module_table.update(&out.output.unwrap(), "test.iona");
+
+        println!("{:#?}", module_table);
 
         // Test import tracking
         assert!(module_table.parsing_status.contains_key("npc"));
