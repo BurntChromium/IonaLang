@@ -115,7 +115,6 @@ impl ModuleTable {
                             .insert(f.name.clone());
                     }
                 }
-                _ => {}
             }
         }
     }
